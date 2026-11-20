@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  windows:
+    name: fmt / clippy / test / build (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ツールチェーン（rust-toolchain.toml に従う）
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: cargo test
+        run: cargo test --workspace --locked
+      - name: cargo build --release
+        run: cargo build --workspace --release --locked
+      - name: 成果物
+        uses: actions/upload-artifact@v4
+        with:
+          name: clipshare-quick-windows
+          path: |
+            target/release/clipshare-quick.exe
+            target/release/clipshare-quick-setup.exe
+            target/release/cq_shell_ext.dll
+            target/release/cq-mock-server.exe
+          if-no-files-found: warn
+          retention-days: 7
+
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: cargo audit
+        run: cargo audit --deny warnings
