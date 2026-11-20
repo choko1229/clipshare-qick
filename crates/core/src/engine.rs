@@ -780,7 +780,10 @@ impl Engine {
             });
             self.save_history(&h);
         }
-        self.inner.unseen_error.store(true, Ordering::SeqCst);
+        // 1日上限とキャンセルは想定内の停止なので、トレイの「エラーあり」にはしない。
+        if code != "DAILY_LIMIT_EXCEEDED" && code != "CANCELLED" {
+            self.inner.unseen_error.store(true, Ordering::SeqCst);
+        }
         self.emit(EngineEvent::Failed {
             entry_id: id.to_owned(),
             file_name: name,
@@ -922,6 +925,7 @@ impl Engine {
             } else {
                 (false, 0)
             };
+        self.publish();
         self.emit(EngineEvent::Uploaded {
             entry_id: entry.id.clone(),
             file_name: entry.file_name.clone(),

@@ -29,3 +29,7 @@ print_stderr = "warn"
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+# 依存クレート（画像処理など）はデバッグ/テストでも最適化する（テストの所要時間と安定性のため）。
+[profile.dev.package."*"]
+opt-level = 2

@@ -3,7 +3,8 @@
 //! - 送信前に拡張子と中身（マジックバイト）が一致するか確認する。
 //! - 上限が分かっていれば先に確認する（画像は縮小、動画はエラー）。
 //! - 413 `SIZE_LIMIT_EXCEEDED`: 画像は長辺 2000px に縮小して 1 回だけ送り直す。動画は縮小できないのでエラー。
-//! - 5xx・タイムアウト・接続エラー: 指数バックオフで再試行（回数・間隔は設定値）。
+//! - 5xx・タイムアウト: 指数バックオフで再試行（回数・間隔は設定値）。
+//! - 接続できない: その場では粘らず返す（呼び出し側が「接続待ち」にして、接続が戻ったら送り直す）。
 //! - 429 `RATE_LIMITED`: 指定秒数待って再試行。429 `DAILY_LIMIT_EXCEEDED`・401 などは再試行しない。
 
 use std::path::Path;
@@ -217,8 +218,9 @@ pub async fn upload_file(
                 let class = e.retry_class();
                 failures += 1;
                 let wait = match class {
-                    RetryClass::Never => return Err(e.into()),
-                    RetryClass::Backoff | RetryClass::WaitForConnection => backoff(retry, failures),
+                    // 接続できないときはその場で粘らず「接続待ち」に回す（接続の確認は呼び出し側が行う）。
+                    RetryClass::Never | RetryClass::WaitForConnection => return Err(e.into()),
+                    RetryClass::Backoff => backoff(retry, failures),
                     RetryClass::After(d) => {
                         d.min(Duration::from_millis(retry.max_backoff_ms.max(1_000) * 10))
                     }
