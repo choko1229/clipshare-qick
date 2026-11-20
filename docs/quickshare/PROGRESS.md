@@ -30,18 +30,18 @@
 - [x] 右クリック共有の進捗ウィンドウ（15） — 2026-11-21（進捗・URL改行連結・一部失敗は結合テスト済み。表示は MANUAL_TESTS）
 
 ## Step 4: OS連携・VR（画面 14, 18, 19）
-- [H] 右クリック拡張（IExplorerCommand、署名付きMSIX、IPC）
-- [H] SteamVR オーバーレイ（HUDトースト、ダッシュボードパネル）
+- [H] 右クリック拡張（IExplorerCommand、署名付きMSIX、IPC） — 2026-11-21 実装・COM の単体テスト済み（`crates/shell-ext`）。実機確認は MANUAL_TESTS §5
+- [H] SteamVR オーバーレイ（HUDトースト、ダッシュボードパネル） — 2026-11-21 実装・描画/当たり判定/イベント構造のテスト済み（`crates/vr`）。実機確認は MANUAL_TESTS §6
 
 ## Step 5: 配布（画面 02, 03, 21, 22）
-- [H] MSIXパッケージ定義、自己署名の手順書、インストーラー画面
-- [H] 更新（確認→通知→選択→ダウンロード→ハッシュ/署名検証→適用、拡張が更新できない場合は再起動案内）
-- [H] アンインストール（連携解除、設定/履歴削除の選択、資格情報削除）
-- [ ] リリースワークフロー（タグ→ビルド→署名→GitHub Releases）。**公開はしない**。手順書のみ
+- [H] MSIXパッケージ定義、自己署名の手順書、インストーラー画面 — 2026-11-21（`installer/`、`clipshare-quick-setup`）。MSIX の作成・署名・インストールは未実行（Windows SDK なし・署名鍵は人が扱う）。MANUAL_TESTS §1
+- [H] 更新（確認→通知→選択→ダウンロード→ハッシュ/署名検証→適用、拡張が更新できない場合は再起動案内） — 2026-11-21 判定・検証は単体テスト済み。適用は MANUAL_TESTS §8
+- [H] アンインストール（連携解除、設定/履歴削除の選択、資格情報削除） — 2026-11-21 後片付けは結合テスト済み。パッケージ削除は MANUAL_TESTS §9
+- [x] リリースワークフロー（タグ→ビルド→署名→GitHub Releases）。**公開はしない**。手順書のみ — 2026-11-21（`.github/workflows/release.yml` は下書き Release まで。手順は `installer/README.md`）
 
 ## Step 6: 仕上げ
-- [ ] `MANUAL_TESTS.md`（実機確認手順）
-- [ ] セルフレビュー1回目（INSTRUCTIONS §10）→ 修正
+- [x] `MANUAL_TESTS.md`（実機確認手順） — 2026-11-21
+- [x] セルフレビュー1回目（INSTRUCTIONS §10）→ 修正 — 2026-11-21（REPORT.md に記録）
 - [ ] セルフレビュー2回目 → 修正
 - [ ] fmt / clippy / test / audit 全通過
 - [ ] `README.md`（利用者向け）、`REPORT.md`（完了報告）
