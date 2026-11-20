@@ -7,7 +7,7 @@
 - [x] ワークスペース構成（core / app / shell-ext / vr / installer）、`rust-toolchain.toml`、`Cargo.toml` の lints
 - [x] UIフレームワーク選定（候補・理由・Windows親和性・日本語・トレイ・保守性）を `QUESTIONS.md` に記録して暫定決定 — 2026-11-20（Q-002: egui/eframe）
 - [x] CI（fmt / clippy / test / audit / Windowsビルド）、`CHANGELOG.md`、`.github` テンプレート
-- [ ] ログ基盤（ローテーション、レベル切替、機微情報マスク）、設定基盤（永続化・検証・即時反映）
+- [x] ログ基盤（ローテーション、レベル切替、機微情報マスク）、設定基盤（永続化・検証・即時反映） — 2026-11-21
 - [ ] **モックサーバー**（API_CONTRACT準拠、全エラーコードを再現可能）と結合テスト基盤
 
 ## Step 1: コア

@@ -519,6 +519,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "cq-ipc",
  "futures-util",
  "image",
  "notify",
@@ -538,6 +539,17 @@ dependencies = [
  "url",
  "windows",
  "zeroize",
+]
+
+[[package]]
+name = "cq-ipc"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "windows",
 ]
 
 [[package]]
