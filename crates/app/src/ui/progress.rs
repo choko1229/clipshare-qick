@@ -58,16 +58,14 @@ impl ProgressWindow {
                                 item_row(ui, &p, &it.file_name, &it.status, it.progress);
                             }
                         });
-                    ui.with_layout(Layout::bottom_up(Align::Max), |ui| {
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if view.finished {
-                                if widgets::secondary(ui, &p, "閉じる").clicked() {
-                                    action = Action::Close;
-                                }
-                            } else if widgets::secondary(ui, &p, "キャンセル").clicked() {
-                                shared.engine.cancel_batch(&self.batch_id);
+                    widgets::bottom_bar(ui, &p, |ui| {
+                        if view.finished {
+                            if widgets::secondary(ui, &p, "閉じる").clicked() {
+                                action = Action::Close;
                             }
-                        });
+                        } else if widgets::secondary(ui, &p, "キャンセル").clicked() {
+                            shared.engine.cancel_batch(&self.batch_id);
+                        }
                     });
                 }
             });
@@ -100,15 +98,13 @@ fn finished_ok(ui: &mut Ui, p: &Palette, view: &BatchView) -> Action {
                     }
                 });
         });
-    ui.with_layout(Layout::bottom_up(Align::Max), |ui| {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if widgets::primary(ui, p, "閉じる").clicked() {
-                action = Action::Close;
-            }
-            if widgets::secondary(ui, p, "履歴を開く").clicked() {
-                action = Action::Open(Screen::History);
-            }
-        });
+    widgets::bottom_bar(ui, p, |ui| {
+        if widgets::primary(ui, p, "閉じる").clicked() {
+            action = Action::Close;
+        }
+        if widgets::secondary(ui, p, "履歴を開く").clicked() {
+            action = Action::Open(Screen::History);
+        }
     });
     action
 }

@@ -7,7 +7,7 @@
 use std::sync::{Arc, Mutex};
 
 use cq_core::engine::{UninstallOptions, UninstallReport, UninstallStep};
-use egui::{Align, Layout, RichText, Ui};
+use egui::{RichText, Ui};
 
 use super::theme::{Palette, regular};
 use super::widgets::{self, Tone};
@@ -114,16 +114,13 @@ impl UninstallWindow {
                 });
             });
         }
-        ui.with_layout(Layout::bottom_up(Align::Max), |ui| {
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if widgets::danger(ui, p, "アンインストール").clicked() {
-                    self.start(shared);
-                }
-                if widgets::secondary(ui, p, "キャンセル").clicked() {
-                    action = Action::Close;
-                }
-            });
-            widgets::divider(ui, p);
+        widgets::bottom_bar(ui, p, |ui| {
+            if widgets::danger(ui, p, "アンインストール").clicked() {
+                self.start(shared);
+            }
+            if widgets::secondary(ui, p, "キャンセル").clicked() {
+                action = Action::Close;
+            }
         });
         action
     }
@@ -233,21 +230,18 @@ fn done(
         "エクスプローラーの右クリックメニューは、再起動後に消えます。",
         p,
     ));
-    ui.with_layout(Layout::bottom_up(Align::Max), |ui| {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if widgets::primary(ui, p, "完了").clicked() {
-                // パッケージの削除は、このプロセスの終了後に行われるよう Windows に依頼する。
-                if removed && !crate::packaging::schedule_self_removal() {
-                    tracing::warn!("パッケージの削除を依頼できませんでした");
-                }
-                action = Action::Quit;
+    widgets::bottom_bar(ui, p, |ui| {
+        if widgets::primary(ui, p, "完了").clicked() {
+            // パッケージの削除は、このプロセスの終了後に行われるよう Windows に依頼する。
+            if removed && !crate::packaging::schedule_self_removal() {
+                tracing::warn!("パッケージの削除を依頼できませんでした");
             }
-            if !report.server_revoked && widgets::secondary(ui, p, "連携アプリを開く").clicked()
-            {
-                crate::platform::open_url(&crate::actions::manage_url(shared));
-            }
-        });
-        widgets::divider(ui, p);
+            action = Action::Quit;
+        }
+        if !report.server_revoked && widgets::secondary(ui, p, "連携アプリを開く").clicked()
+        {
+            crate::platform::open_url(&crate::actions::manage_url(shared));
+        }
     });
     action
 }

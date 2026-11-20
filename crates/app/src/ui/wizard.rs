@@ -89,7 +89,6 @@ impl Wizard {
     }
 
     fn welcome(&mut self, ui: &mut Ui, p: &Palette) -> Action {
-        let mut action = Action::None;
         ui.label(widgets::title("ようこそ", p));
         ui.label(widgets::body(
             "VRChatで撮った写真を、撮影と同時に共有URLにします。URLはクリップボードに自動でコピーされ、チャットやSNSにそのまま貼り付けられます。",
@@ -120,10 +119,7 @@ impl Wizard {
                 ui.label(widgets::muted("あとから設定で変更できます", p));
             });
         });
-        if self.step > 3 {
-            action = Action::Close;
-        }
-        action
+        Action::None
     }
 
     fn folder(&mut self, ui: &mut Ui, p: &Palette) -> Action {

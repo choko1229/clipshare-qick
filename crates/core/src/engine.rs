@@ -1467,6 +1467,12 @@ impl Engine {
         } else {
             report.server_revoked = true;
         }
+        // 資格情報マネージャーのトークンは、サーバー側の解除を選ばなくても必ず削除する（INSTRUCTIONS §5）。
+        if let Err(e) = self.inner.token_store.delete() {
+            tracing::warn!(error = %e, "資格情報マネージャーのトークンを削除できませんでした");
+        }
+        // SteamVR の登録ファイル（.vrmanifest）は残さない。
+        let _ = std::fs::remove_dir_all(self.inner.paths.root().join("steamvr"));
         if opts.delete_local_data {
             on_step(UninstallStep::DeletingFiles);
             let root = self.inner.paths.root().to_path_buf();

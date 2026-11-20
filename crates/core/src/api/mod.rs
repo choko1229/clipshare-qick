@@ -145,7 +145,12 @@ impl ApiClient {
     ) -> Result<RequestBuilder, ApiError> {
         let mut rb = self.http.request(method, self.url(path)?);
         if let Some(t) = token {
-            rb = rb.header(AUTHORIZATION, format!("Bearer {}", t.expose()));
+            let mut v = reqwest::header::HeaderValue::from_str(&format!("Bearer {}", t.expose()))
+                .map_err(|_| ApiError::InvalidRequest {
+                message: "token".to_owned(),
+            })?;
+            v.set_sensitive(true);
+            rb = rb.header(AUTHORIZATION, v);
         }
         Ok(rb)
     }
@@ -305,9 +310,16 @@ impl ApiClient {
         let path = format!("api/v1/quick/{id}");
         let rb = match auth {
             DeleteAuth::Bearer(t) => self.request(Method::DELETE, &path, Some(t))?,
-            DeleteAuth::DeleteToken(t) => self
-                .request(Method::DELETE, &path, None)?
-                .header("X-Delete-Token", t.expose()),
+            DeleteAuth::DeleteToken(t) => {
+                let mut v = reqwest::header::HeaderValue::from_str(t.expose()).map_err(|_| {
+                    ApiError::InvalidRequest {
+                        message: "deleteToken".to_owned(),
+                    }
+                })?;
+                v.set_sensitive(true);
+                self.request(Method::DELETE, &path, None)?
+                    .header("X-Delete-Token", v)
+            }
         };
         self.send("quick:delete", rb).await.map(|_| ())
     }
