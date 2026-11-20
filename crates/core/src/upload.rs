@@ -69,6 +69,7 @@ impl UploadError {
                 | ApiError::Server { .. }
                 | ApiError::RateLimited { .. } => "送信に失敗しました".to_owned(),
                 ApiError::UnsupportedMedia => "対応していないファイル形式です".to_owned(),
+                ApiError::Forbidden => "このアカウントではアップロードできません".to_owned(),
                 ApiError::Io(_) => "ファイルを読み込めませんでした".to_owned(),
                 other => other.to_string(),
             },

@@ -11,7 +11,8 @@ use crate::media::MediaKind;
 pub enum ApiError {
     #[error("連携が無効になっています（再ログインが必要です）")]
     Unauthorized,
-    #[error("権限がありません")]
+    /// 権限がない（BAN されたアカウント・端末を含む）。再認可しても解決しない（契約 v1.1）。
+    #[error("このアカウントでは利用できません")]
     Forbidden,
     #[error("見つかりませんでした")]
     NotFound,
@@ -21,11 +22,17 @@ pub enum ApiError {
     SizeLimitExceeded {
         limit_bytes: Option<u64>,
         kind: Option<MediaKind>,
+        /// 画素数の上限を超えた場合（契約 v1.1 の `details.limitPixels`）。
+        limit_pixels: Option<u64>,
     },
     #[error("対応していないファイル形式です")]
     UnsupportedMedia,
     #[error("今日の上限に達しました")]
-    DailyLimitExceeded { resets_at: Option<DateTime<Utc>> },
+    DailyLimitExceeded {
+        resets_at: Option<DateTime<Utc>>,
+        /// その日の上限件数（契約 v1.1 の `details.dailyLimit`）。
+        daily_limit: Option<u64>,
+    },
     #[error("混み合っています")]
     RateLimited { retry_after: Option<Duration> },
     #[error("サーバーでエラーが発生しました（HTTP {status}）")]
@@ -139,7 +146,11 @@ mod tests {
             RetryClass::After(Duration::from_secs(5))
         );
         assert_eq!(
-            ApiError::DailyLimitExceeded { resets_at: None }.retry_class(),
+            ApiError::DailyLimitExceeded {
+                resets_at: None,
+                daily_limit: None
+            }
+            .retry_class(),
             RetryClass::Never
         );
         assert_eq!(ApiError::UnsupportedMedia.retry_class(), RetryClass::Never);

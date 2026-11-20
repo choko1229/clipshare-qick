@@ -29,6 +29,25 @@ impl UpdateWindow {
                     buttons(ui, &p, |ui| widgets::secondary(ui, &p, "閉じる").clicked().then_some(Action::Close))
                 }
                 UpdateState::Available { version, size_bytes, notes } => available(ui, &p, shared, &version, size_bytes, &notes),
+                UpdateState::ManualAvailable { version, notes } => {
+                    ui.label(widgets::title("新しいバージョンがあります", &p));
+                    ui.label(widgets::muted(&format!("v{} → {version}", cq_core::APP_VERSION), &p));
+                    ui.add_space(6.0);
+                    widgets::card(ui, &p, |ui| {
+                        ui.label(widgets::strong("変更点", &p));
+                        egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
+                            for line in notes.lines().filter(|l| !l.trim().is_empty()).take(30) {
+                                ui.label(RichText::new(line.trim()).font(regular(13.0)).color(p.fg));
+                            }
+                        });
+                    });
+                    buttons(ui, &p, |ui| {
+                        if widgets::primary(ui, &p, "更新履歴").clicked() {
+                            crate::platform::open_url(&crate::actions::download_page_url(shared));
+                        }
+                        widgets::secondary(ui, &p, "後で").clicked().then_some(Action::Close)
+                    })
+                }
                 UpdateState::Downloading { version, fraction, bytes_per_sec } => {
                     ui.label(widgets::title("ダウンロードしています…", &p));
                     ui.label(widgets::strong(&version, &p));

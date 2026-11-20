@@ -86,6 +86,8 @@ pub struct Snapshot {
     pub history: Vec<HistoryEntry>,
     pub folders: Vec<FolderStatus>,
     pub unseen_error: bool,
+    /// 403（BAN など）で利用できない状態。
+    pub blocked: bool,
 }
 
 /// UI・通知・VR 向けのイベント。
@@ -128,6 +130,8 @@ pub enum EngineEvent {
         limit: Option<u64>,
     },
     AuthExpired,
+    /// 403 FORBIDDEN を受けた（BAN など。再ログインでは解決しない）。
+    AccountBlocked,
     Offline {
         waiting: usize,
     },
@@ -307,6 +311,7 @@ impl Engine {
             history: Vec::new(),
             folders: Vec::new(),
             unseen_error: false,
+            blocked: false,
         });
         let inner = Arc::new(Inner {
             paths: cfg.paths,
@@ -417,7 +422,7 @@ impl Engine {
                 .count();
             (h.entries().to_vec(), waiting)
         };
-        let (account, paused) = {
+        let (account, paused, blocked) = {
             let st = lock(&self.inner.state);
             let account = match (&st.state.account, st.state.needs_relogin) {
                 (None, _) => AccountView::Anonymous,
@@ -428,7 +433,7 @@ impl Engine {
                     name: a.user.name.clone(),
                 },
             };
-            (account, st.paused(now))
+            (account, st.paused(now), st.state.account_blocked)
         };
         let offline = !self.inner.online.load(Ordering::SeqCst);
         let uploading = history.iter().any(|e| e.status == EntryStatus::Uploading);
@@ -439,7 +444,7 @@ impl Engine {
             TrayState::Uploading
         } else if offline {
             TrayState::Offline
-        } else if unseen_error {
+        } else if unseen_error || blocked {
             TrayState::Error
         } else if !settings.auto_upload_active() || paused {
             TrayState::Paused
@@ -457,6 +462,7 @@ impl Engine {
             history,
             folders: lock(&self.inner.folders).clone(),
             unseen_error,
+            blocked,
         };
         self.inner.snapshot.send_replace(snap);
     }
@@ -555,6 +561,35 @@ impl Engine {
         });
     }
 
+    /// 403 による利用停止を記録・解除する。停止中は自動アップロードを送らない（匿名にも切り替えない）。
+    fn set_blocked(&self, blocked: bool) {
+        let changed = {
+            let mut st = lock(&self.inner.state);
+            if st.state.account_blocked == blocked {
+                false
+            } else {
+                st.state.account_blocked = blocked;
+                self.save_state(&st);
+                true
+            }
+        };
+        if changed {
+            if blocked {
+                tracing::warn!(
+                    "403 を受けたため自動アップロードを停止します（アカウントの状態を確認する必要があります）"
+                );
+                self.emit(EngineEvent::AccountBlocked);
+            } else {
+                tracing::info!("利用停止が解除されました");
+            }
+            self.publish();
+        }
+    }
+
+    pub fn is_blocked(&self) -> bool {
+        lock(&self.inner.state).state.account_blocked
+    }
+
     fn mark_needs_relogin(&self) {
         let changed = {
             let mut st = lock(&self.inner.state);
@@ -594,11 +629,13 @@ impl Engine {
                 if token.is_some() && !me.authenticated {
                     self.mark_needs_relogin();
                 }
+                self.set_blocked(false);
                 *lock(&self.inner.limits) = Some(me.limits);
                 self.set_online(true);
                 self.publish();
             }
             Err(ApiError::Unauthorized) if token.is_some() => self.mark_needs_relogin(),
+            Err(ApiError::Forbidden) => self.set_blocked(true),
             Err(e) if e.retry_class() == crate::api::RetryClass::WaitForConnection => {
                 self.set_offline()
             }
@@ -609,7 +646,12 @@ impl Engine {
     /// ブラウザ認可を始める。
     pub async fn start_login(&self) -> Result<LoginSession, AuthError> {
         let base = self.api().base_url().clone();
-        let pending = PendingAuth::start(&base, &crate::auth::device_name()).await?;
+        let pending = PendingAuth::start_with_platform(
+            &base,
+            &crate::auth::device_name(),
+            Some(&crate::auth::device_platform()),
+        )
+        .await?;
         Ok(LoginSession {
             engine: self.clone(),
             pending,
@@ -630,6 +672,7 @@ impl Engine {
                 linked_at: Self::now(),
             });
             st.state.needs_relogin = false;
+            st.state.account_blocked = false;
             if let Err(e) = st.save() {
                 // 連携の記録を残せないと、次回起動時に状態が食い違うため失敗として扱う。
                 tracing::error!(error = %e, "連携の記録を保存できませんでした");
@@ -680,6 +723,7 @@ impl Engine {
             let mut st = lock(&self.inner.state);
             st.state.account = None;
             st.state.needs_relogin = false;
+            st.state.account_blocked = false;
             self.save_state(&st);
         }
         *lock(&self.inner.limits) = None;
@@ -830,6 +874,10 @@ impl Engine {
             tracing::info!(file = %name, "自動アップロードが無効のため送りません");
             return;
         }
+        if self.is_blocked() {
+            tracing::info!(file = %name, "利用が停止されているため送りません");
+            return;
+        }
         let now = Self::now();
         if lock(&self.inner.state).paused(now) {
             // 停止中に撮った写真は送らない（キューにも積まない）。
@@ -942,6 +990,16 @@ impl Engine {
             self.after_entry(&entry);
             return;
         }
+        if !job.manual && entry.source == EntrySource::Auto && self.is_blocked() {
+            self.fail(
+                &id,
+                "FORBIDDEN",
+                "このアカウントではアップロードできません",
+                false,
+            );
+            self.after_entry(&entry);
+            return;
+        }
         let token = match self.token() {
             Ok(t) => t,
             Err(_) => {
@@ -1030,7 +1088,12 @@ impl Engine {
                 e.remote_id = Some(r.id.clone());
                 e.url = Some(r.url.clone());
                 e.expires_at = Some(r.expires_at);
-                e.delete_token = r.delete_token.clone();
+                // deleteToken は匿名のときだけ返る（契約 v1.1）。トークンありで返っても保持しない。
+                e.delete_token = if anonymous {
+                    r.delete_token.clone()
+                } else {
+                    None
+                };
                 e.anonymous = anonymous;
                 e.shrunk = up.shrunk;
                 e.failure = None;
@@ -1113,7 +1176,14 @@ impl Engine {
                 self.fail(id, err.code(), &err.user_message(), true);
                 self.mark_needs_relogin();
             }
-            UploadError::Api(ApiError::DailyLimitExceeded { resets_at }) => {
+            UploadError::Api(ApiError::Forbidden) => {
+                self.fail(id, err.code(), &err.user_message(), false);
+                self.set_blocked(true);
+            }
+            UploadError::Api(ApiError::DailyLimitExceeded {
+                resets_at,
+                daily_limit,
+            }) => {
                 let anonymous = lock(&self.inner.state).state.account.is_none();
                 let newly_paused = {
                     let mut st = lock(&self.inner.state);
@@ -1125,7 +1195,9 @@ impl Engine {
                 self.fail(id, err.code(), "今日の上限に達しました", true);
                 tracing::warn!("1日の上限に達したため自動アップロードを停止します");
                 if newly_paused {
-                    let limit = lock(&self.inner.limits).as_ref().and_then(Limits::daily);
+                    let limit = daily_limit
+                        .filter(|&d| d != 0)
+                        .or_else(|| lock(&self.inner.limits).as_ref().and_then(Limits::daily));
                     self.emit(EngineEvent::DailyLimitReached { anonymous, limit });
                 }
             }

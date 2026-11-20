@@ -199,9 +199,15 @@ impl ApiClient {
                 redirect_uri,
             });
         let resp = self.send("auth/token", rb).await?;
-        resp.json()
+        let parsed: TokenResponse = resp
+            .json()
             .await
-            .map_err(|_| ApiError::UnexpectedResponse { status: 200 })
+            .map_err(|_| ApiError::UnexpectedResponse { status: 200 })?;
+        if !is_valid_token_format(parsed.token.expose()) {
+            tracing::warn!("トークンの形式が契約と異なるため受け取りません");
+            return Err(ApiError::UnexpectedResponse { status: 200 });
+        }
+        Ok(parsed)
     }
 
     /// `DELETE /api/v1/auth/token`（自分自身のトークンを失効）。
@@ -366,6 +372,7 @@ impl ApiClient {
             return Err(ApiError::SizeLimitExceeded {
                 limit_bytes: Some(max_bytes),
                 kind: None,
+                limit_pixels: None,
             });
         }
         if let Some(parent) = dest.parent() {
@@ -395,6 +402,7 @@ impl ApiClient {
                 return Err(ApiError::SizeLimitExceeded {
                     limit_bytes: Some(max_bytes),
                     kind: None,
+                    limit_pixels: None,
                 });
             }
             hasher.update(&chunk);
@@ -407,6 +415,14 @@ impl ApiClient {
         file.sync_all().await.map_err(ApiError::Io)?;
         Ok(hex(&hasher.finalize()))
     }
+}
+
+/// 契約 v1.1 のトークン形式: `csq_` で始まる URL-safe な 47 文字。
+pub fn is_valid_token_format(t: &str) -> bool {
+    t.len() == 47
+        && t.starts_with("csq_")
+        && t.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// バイト列を16進小文字にする。
@@ -459,11 +475,13 @@ async fn error_from_response(endpoint: &'static str, resp: Response) -> ApiError
         (_, "UNAUTHORIZED") | (401, _) => ApiError::Unauthorized,
         (_, "FORBIDDEN") | (403, _) => ApiError::Forbidden,
         (_, "NOT_FOUND") | (404, _) => ApiError::NotFound,
+        // 前段の nginx が HTML の 413 を返すことがある（契約 v1.1）。本文が JSON でなくても 413 はサイズ超過。
         (_, "SIZE_LIMIT_EXCEEDED") | (413, _) => ApiError::SizeLimitExceeded {
             limit_bytes: detail_u64("limitBytes"),
             kind: details
                 .and_then(|d| d.get("kind"))
                 .and_then(|k| serde_json::from_value(k.clone()).ok()),
+            limit_pixels: detail_u64("limitPixels"),
         },
         (_, "UNSUPPORTED_MEDIA") | (415, _) => ApiError::UnsupportedMedia,
         (_, "DAILY_LIMIT_EXCEEDED") => ApiError::DailyLimitExceeded {
@@ -472,6 +490,7 @@ async fn error_from_response(endpoint: &'static str, resp: Response) -> ApiError
                 .and_then(|v| v.as_str())
                 .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
                 .map(|d| d.with_timezone(&chrono::Utc)),
+            daily_limit: detail_u64("dailyLimit"),
         },
         (_, "RATE_LIMITED") | (429, _) => ApiError::RateLimited {
             retry_after: detail_u64("retryAfterSeconds")
@@ -537,6 +556,15 @@ mod tests {
         assert!(c.check_share_url("https://evil.example/q/abc").is_err());
         assert!(c.check_share_url("http://clipshare.link/q/abc").is_err());
         assert!(c.check_share_url("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn token_format_follows_contract() {
+        let ok = format!("csq_{}", "a".repeat(43));
+        assert!(is_valid_token_format(&ok));
+        assert!(!is_valid_token_format(&format!("csq_{}", "a".repeat(42))));
+        assert!(!is_valid_token_format(&format!("tok_{}", "a".repeat(43))));
+        assert!(!is_valid_token_format(&format!("csq_{}+", "a".repeat(42))));
     }
 
     #[test]

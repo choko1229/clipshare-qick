@@ -210,10 +210,23 @@ impl SettingsWindow {
         if let LoginState::Failed { code } = &login {
             widgets::tinted(ui, p.des, p.des, |ui| {
                 ui.label(widgets::strong("連携できませんでした", p));
+                ui.label(widgets::muted(super::wizard::login_failure_text(code), p));
                 ui.horizontal(|ui| {
                     ui.label(widgets::muted("エラーコード", p));
                     ui.label(RichText::new(code).font(bold(13.0)).color(p.det));
                 });
+            });
+        }
+        if snap.blocked {
+            widgets::tinted(ui, p.des, p.des, |ui| {
+                ui.label(widgets::strong("このアカウントでは利用できません", p));
+                ui.label(widgets::muted(
+                    "Clipshareでアカウントの状態を確認してください。",
+                    p,
+                ));
+                if widgets::small(ui, p, "Webで確認").clicked() {
+                    crate::platform::open_url(&crate::actions::manage_url(shared));
+                }
             });
         }
         match &snap.account {

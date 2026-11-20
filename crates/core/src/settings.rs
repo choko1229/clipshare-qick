@@ -158,7 +158,7 @@ impl Default for AdvancedSettings {
             toast_aggregate_ms: 4_000,
             offline_probe_interval_secs: 30,
             auth_timeout_secs: 300,
-            manage_apps_path: "/qick/apps".to_owned(),
+            manage_apps_path: "/settings/apps".to_owned(),
             download_page_path: "/qick/download".to_owned(),
         }
     }
@@ -522,7 +522,7 @@ mod tests {
         assert!(s.validate().is_err());
         s.advanced.manage_apps_path = "https://evil.example".into();
         assert!(s.validate().is_err());
-        s.advanced.manage_apps_path = "/qick/apps".into();
+        s.advanced.manage_apps_path = "/settings/apps".into();
         assert!(s.validate().is_ok());
     }
 

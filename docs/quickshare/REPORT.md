@@ -104,13 +104,40 @@
 
 ## 7. 残課題・人に確認したいこと
 
-QUESTIONS.md の Q-001〜Q-023（状態はすべて「未確認」）。特に判断が必要なもの:
+QUESTIONS.md の Q-001〜Q-025（Q-004・Q-014・Q-015 は確認済み、ほかは未確認）。特に判断が必要なもの:
 
 1. 署名（自己署名のまま公開するか、Publisher 名）— Q-006、Q-021
 2. 配布物の形（セットアップ exe + msix か、msix のみか）— Q-008
 3. アンインストールの導線（アプリ内から）— Q-009
-4. Clipshare 側への依頼: 連携アプリ管理ページの URL（Q-014）、動画の処理状態を取得する API（Q-015）、API 契約の正本の公開（Q-004）
-5. 開発機への VS Build Tools / Windows SDK の導入可否（入れれば MSIX のローカル作成・署名・インストール確認ができる）— Q-001
+4. Clipshare 側への依頼: client/latest の sha256 を必ず返すこと（Q-025）。動画の処理状態 API は無いことを確認済みで、現状仕様を維持（Q-015）
+5. 403（BAN）時の文言・案内先（Q-024）
+6. 開発機への VS Build Tools / Windows SDK の導入可否（入れれば MSIX のローカル作成・署名・インストール確認ができる）— Q-001
 
 実機確認が必要な項目は `MANUAL_TESTS.md`（右クリック・SteamVR・MSIX・更新・アンインストール・VRChat 実撮影・ライト/ダーク・高 DPI）。
 `main` へのマージ、タグの作成、GitHub Releases の公開、証明書の作成と信頼ストアへの登録は行っていない（手順は `installer/README.md`）。
+
+## 8. API 契約 v1.1 への追従（2026-11-21）
+
+`clipeshare` PR #1（`feature/quickshare-api-v1`）の `API_CONTRACT.md`（v1.1）と `REPORT.md` §7 を取り込んだ。すべて追加・明確化で、v1 の動作は壊していない。
+
+| # | 契約の変更点 | クライアントの対応 | テスト |
+|---|---|---|---|
+| 1 | 認可URLに `device_platform`、各パラメータの形式 | `device_platform`（`Windows 11` / `Windows 10`、ビルド番号から判定）を付与。`device_name` は制御文字を除き前後の空白を取って 1〜64 文字（空なら `Windows PC`） | `auth` 単体、`v11_token_format_issuance_pause_and_ban_at_login` |
+| 2 | 許可/キャンセルは 303 | ループバックはリダイレクトの種類に依存しない（GET を受けるだけ）。モックを 303 に変更 | 同上（303 を確認） |
+| 3 | 任意の完了画面 `/qick/authorize/complete` | 許可を受けたらブラウザを `302 {base}/qick/authorize/complete` へ戻す（拒否・不正時は自前の短いページ） | `auth` 単体、同上 |
+| 4 | トークンは `csq_` で始まる 47 文字。使用済みコードの再提示で連動失効 | 交換結果の形式を検証し、違えば受け取らない（保存しない）。コードは 1 回しか送らない | `api` 単体、同上（保存されたトークンの形式） |
+| 5 | 403 は BAN（再認可で解決しない）、503 は発行停止中にも返る | 403 で「利用停止」状態にし、自動アップロードを止めて案内（再ログインを求めない・匿名にしない、Q-024）。連携時の 403/503 は専用の説明とコード（`FORBIDDEN` / `SERVICE_UNAVAILABLE`） | `v11_forbidden_blocks_uploads_without_falling_back_to_anonymous`、同上 |
+| 6 | nginx の HTML 413、画素数超過 413（`limitPixels`） | 413 は本文が JSON でなくてもサイズ超過として扱い、画像は長辺 2000px に縮小して再送 | `v11_html_413_and_pixel_limit_are_shrunk_and_resent` |
+| 7 | 429 の `details.dailyLimit` | 1日上限の通知の件数に使う（無ければ `/me` の上限） | `v11_daily_limit_details_are_used` |
+| 8 | 日次はトークンありならユーザー単位（Web と共通）、匿名は IP 単位、リセットはサーバー現地 0 時 | 再開はサーバーの `resetsAt` に従う（既存の実装どおり）。件数表示は `/me` の `dailyUsed` を使うので Web 分も含まれる | 既存の日次上限テスト |
+| 9 | 形式はマジックバイトで判定（jpg/png/webp/mp4/mov/webm/mkv/avi）、不一致は 415 | 送信前に拡張子と中身の一致を確認（不一致は送らない）。MKV・AVI を対象に追加（監視・右クリック・MSIX の関連付け） | `media` 単体、`v11_mock_rejects_nameless_part_and_mismatched_type` |
+| 10 | 匿名は original でもバナーあり、original の寸法・品質 | 表示文言は既存のまま整合（未ログインは「画像にバナーが付きます」） | — |
+| 11 | `deleteToken` は匿名のときだけ | トークンありの応答に含まれていても保存しない | `v11_token_format_issuance_pause_and_ban_at_login` |
+| 12 | Bearer で削除できるのは API 経由のアップロードのみ | クライアントが削除するのは自分が API で上げたものだけ。404 は削除済みとして扱う（既存） | 既存の削除テスト |
+| 13 | `client/latest` の `sha256` は null になりうる、未取得時 503 | null（または不正）ならアプリ内では適用せず、ダウンロードページへ案内（Q-025）。503 は確認失敗として記録 | `update` 単体 |
+| 14 | `/api/v1/*` は CORS 不可・`no-store` | クライアントはブラウザから呼ばないので影響なし | — |
+| 追加 | `file` はファイル名付きのパート（無いと 400） | 既存どおりファイル名を付けて送る。モックは無いと 400 | `v11_mock_rejects_nameless_part_and_mismatched_type` |
+
+あわせて、連携アプリ管理ページの既定 URL を `{APIベースURL}/settings/apps` に修正した（Q-014）。動画の処理完了を知る API は無いため、`PROCESSING` のまま URL をコピーする現状仕様を維持した（Q-015）。
+
+テスト結果（v1.1 追従後）: `cargo fmt --check`・`cargo clippy --workspace --all-targets -D warnings` 通過、`cargo test --workspace` **120 件成功**（4 回連続）、`cargo build --workspace --release` 成功。

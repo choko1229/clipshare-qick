@@ -21,6 +21,12 @@ pub enum UpdateDecision {
         /// 今のバージョンがサポート外（更新を強く勧める）。
         required: bool,
     },
+    /// 新しいバージョンはあるが、配布ファイルの SHA-256 が無いためアプリ内では適用しない
+    /// （ダウンロードページへ案内する。契約 v1.1 で sha256 は null になりうる）。
+    ManualOnly {
+        version: Version,
+        notes: String,
+    },
     /// 新しいバージョンはあるが配布ファイル（.msix）が無い。
     NoAsset,
 }
@@ -62,20 +68,28 @@ pub fn decide(current: &str, latest: &LatestRelease) -> Result<UpdateDecision, U
         .as_deref()
         .and_then(|m| Version::parse(m.trim_start_matches('v')).ok())
         .is_some_and(|m| cur < m);
-    let asset = latest.assets.iter().find(|a| {
-        a.name.to_ascii_lowercase().ends_with(PACKAGE_EXT)
-            && a.sha256.len() == 64
-            && a.sha256.chars().all(|c| c.is_ascii_hexdigit())
-            && a.size_bytes > 0
+    let packages: Vec<&ReleaseAsset> = latest
+        .assets
+        .iter()
+        .filter(|a| a.name.to_ascii_lowercase().ends_with(PACKAGE_EXT) && a.size_bytes > 0)
+        .collect();
+    let verifiable = packages.iter().find(|a| {
+        a.sha256
+            .as_deref()
+            .is_some_and(|h| h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()))
     });
-    match asset {
-        Some(a) => Ok(UpdateDecision::Available {
+    match (verifiable, packages.is_empty()) {
+        (Some(a), _) => Ok(UpdateDecision::Available {
             version: new,
-            asset: a.clone(),
+            asset: (*a).clone(),
             notes: latest.notes.clone(),
             required,
         }),
-        None => Ok(UpdateDecision::NoAsset),
+        (None, false) => Ok(UpdateDecision::ManualOnly {
+            version: new,
+            notes: latest.notes.clone(),
+        }),
+        (None, true) => Ok(UpdateDecision::NoAsset),
     }
 }
 
@@ -88,7 +102,9 @@ pub fn verify_download(
     if actual_size != asset.size_bytes {
         return Err(UpdateError::SizeMismatch);
     }
-    if !actual_sha256.eq_ignore_ascii_case(&asset.sha256) {
+    // 期待値が無いものは検証できないので適用しない。
+    let expected = asset.sha256.as_deref().ok_or(UpdateError::HashMismatch)?;
+    if !actual_sha256.eq_ignore_ascii_case(expected) {
         return Err(UpdateError::HashMismatch);
     }
     Ok(())
@@ -126,7 +142,7 @@ mod tests {
             name: "ClipshareQuick-1.2.3.msix".into(),
             url: "https://github.com/choko1229/clipshare-qick/releases/download/v1.2.3/ClipshareQuick-1.2.3.msix".into(),
             size_bytes: 10,
-            sha256: "a".repeat(64),
+            sha256: Some("a".repeat(64)),
         }
     }
 
@@ -158,12 +174,34 @@ mod tests {
             UpdateDecision::NoAsset
         );
         let mut bad = msix();
-        bad.sha256 = "zz".into();
-        assert_eq!(
+        bad.sha256 = Some("zz".into());
+        // 検証できないハッシュはアプリ内では適用せず、ダウンロードページへ案内する
+        assert!(matches!(
             decide("1.0.0", &latest("1.2.3", None, vec![bad])).unwrap(),
-            UpdateDecision::NoAsset
-        );
+            UpdateDecision::ManualOnly { .. }
+        ));
         assert!(decide("x", &latest("1.2.3", None, vec![])).is_err());
+    }
+
+    #[test]
+    fn missing_sha256_is_manual_only_and_never_verified() {
+        let mut a = msix();
+        a.sha256 = None;
+        match decide("1.0.0", &latest("1.2.3", None, vec![a.clone()])).unwrap() {
+            UpdateDecision::ManualOnly { version, .. } => {
+                assert_eq!(version, Version::new(1, 2, 3))
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            verify_download(&a, &"a".repeat(64), 10),
+            Err(UpdateError::HashMismatch)
+        );
+        let j: LatestRelease = serde_json::from_str(
+            r#"{"version":"1.2.3","publishedAt":"2026-11-21T00:00:00Z","assets":[{"name":"x.msix","url":"u","sizeBytes":1,"sha256":null}]}"#,
+        )
+        .unwrap();
+        assert!(j.assets[0].sha256.is_none());
     }
 
     #[test]

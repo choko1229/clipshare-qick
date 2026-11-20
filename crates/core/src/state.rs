@@ -63,6 +63,8 @@ pub struct PersistentState {
     pub daily_pause: Option<DailyPause>,
     /// 401 を受けて再ログインが必要な状態。
     pub needs_relogin: bool,
+    /// 403 FORBIDDEN（BAN など）を受けて利用できない状態。再認可しても解決しない（契約 v1.1）。
+    pub account_blocked: bool,
     pub last_update_check: Option<DateTime<Utc>>,
 }
 

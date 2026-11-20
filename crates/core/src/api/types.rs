@@ -99,7 +99,9 @@ pub struct ReleaseAsset {
     pub name: String,
     pub url: String,
     pub size_bytes: u64,
-    pub sha256: String,
+    /// GitHub が digest を返さない場合は null（契約 v1.1）。
+    #[serde(default)]
+    pub sha256: Option<String>,
 }
 
 /// `GET /api/v1/client/latest`

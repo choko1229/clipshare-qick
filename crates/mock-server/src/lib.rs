@@ -1,4 +1,4 @@
-//! API 契約 v1（`docs/quickshare/API_CONTRACT.md`）のモックサーバー。
+//! API 契約 v1.1（`docs/quickshare/API_CONTRACT.md`）のモックサーバー。
 //!
 //! Clipshare 側の実装が反映される前でも、クライアントの開発・結合テストができるようにする。
 //! 契約にあるすべてのエラーコードを [`Scripted`] で再現できる。
@@ -54,6 +54,10 @@ pub struct MockConfig {
     #[serde(skip)]
     pub download_body: Vec<u8>,
     pub user_name: String,
+    /// アカウントが BAN されている（トークンありの要求とトークン発行に 403）。
+    pub banned: bool,
+    /// 管理者がトークンの発行を止めている（トークン交換に 503）。
+    pub token_issuance_paused: bool,
 }
 
 impl Default for MockConfig {
@@ -70,6 +74,8 @@ impl Default for MockConfig {
             latest: None,
             download_body: Vec::new(),
             user_name: "choko1229".to_owned(),
+            banned: false,
+            token_issuance_paused: false,
         }
     }
 }
@@ -89,6 +95,12 @@ pub enum Scripted {
     RateLimited { retry_after_seconds: u64 },
     /// 指定ミリ秒待ってから通常どおり処理する（タイムアウト確認用）。
     Delay { ms: u64 },
+    /// 任意の本文をそのまま返す（例: 前段の nginx が返す HTML の 413）。
+    Raw {
+        status: u16,
+        content_type: String,
+        body: String,
+    },
 }
 
 /// 台本を差し込めるエンドポイント。
@@ -122,6 +134,7 @@ struct CodeInfo {
     redirect_uri: String,
     created: DateTime<Utc>,
     used: bool,
+    issued_token: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -272,7 +285,7 @@ impl MockServer {
 
     /// 有効なトークンを直接発行する（ブラウザ認可を省くテスト用）。
     pub fn issue_token(&self) -> String {
-        let t = format!("mock_{}", random_string(32));
+        let t = new_token();
         let mut g = lock(&self.state);
         let name = g.cfg.user_name.clone();
         g.tokens.insert(t.clone(), name);
@@ -309,6 +322,16 @@ fn error(status: StatusCode, code: &str, message: &str, details: Value) -> Respo
         axum::Json(json!({ "error": { "code": code, "message": message, "details": details } })),
     )
         .into_response()
+}
+
+/// 契約 v1.1 のトークン形式（`csq_` で始まる URL-safe な 47 文字）。
+fn new_token() -> String {
+    const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut rng = rand::rng();
+    let body: String = (0..43)
+        .map(|_| char::from(A.get(rng.random_range(0..A.len())).copied().unwrap_or(b'a')))
+        .collect();
+    format!("csq_{body}")
 }
 
 fn random_string(n: usize) -> String {
@@ -369,6 +392,18 @@ async fn scripted(state: &Shared, ep: Endpoint) -> Option<Response> {
             tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
             None
         }
+        Scripted::Raw {
+            status,
+            content_type,
+            body,
+        } => Some(
+            (
+                StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                [(header::CONTENT_TYPE, content_type)],
+                body,
+            )
+                .into_response(),
+        ),
     }
 }
 
@@ -431,6 +466,7 @@ impl IntoResponse for Unauthorized {
 fn router(state: Shared) -> Router {
     Router::new()
         .route("/qick/authorize", get(authorize))
+        .route("/qick/authorize/complete", get(authorize_complete))
         .route("/api/v1/auth/token", post(token).delete(revoke_token))
         .route("/api/v1/me", get(me))
         .route("/api/v1/quick", post(quick))
@@ -446,6 +482,14 @@ fn router(state: Shared) -> Router {
         .with_state(state)
 }
 
+async fn authorize_complete() -> Response {
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        "<!doctype html><meta charset=utf-8><title>mock</title><p>（モック）連携が完了しました</p>",
+    )
+        .into_response()
+}
+
 async fn authorize(
     State(state): State<Shared>,
     Query(q): Query<HashMap<String, String>>,
@@ -456,16 +500,32 @@ async fn authorize(
         || redirect.starts_with("http://[::1]:"))
         && url_like_port(redirect);
     let code_ok = {
-        let c = get("connection_code");
-        c.len() == 7 && c.as_bytes().get(3) == Some(&b'-')
+        let c = get("connection_code").as_bytes();
+        let allowed = |b: &u8| b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789".contains(b);
+        c.len() == 7
+            && c.get(3) == Some(&b'-')
+            && c.iter().enumerate().all(|(i, b)| i == 3 || allowed(b))
     };
+    let state_ok = (1..=256).contains(&get("state").len())
+        && get("state").bytes().all(|b| (0x21..=0x7e).contains(&b));
+    let challenge_ok = get("code_challenge").len() == 43
+        && get("code_challenge")
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    let name = get("device_name");
+    let name_ok = name == name.trim()
+        && (1..=64).contains(&name.chars().count())
+        && !name.chars().any(char::is_control);
+    let platform = get("device_platform");
+    let platform_ok = platform.chars().count() <= 32 && !platform.chars().any(char::is_control);
     if get("client_id") != "clipshare-quick"
         || !redirect_ok
         || get("code_challenge_method") != "S256"
-        || get("code_challenge").len() < 43
-        || get("state").is_empty()
+        || !challenge_ok
+        || !state_ok
         || !code_ok
-        || get("device_name").chars().count() > 64
+        || !name_ok
+        || !platform_ok
     {
         return error(
             StatusCode::BAD_REQUEST,
@@ -488,6 +548,7 @@ async fn authorize(
                     redirect_uri: redirect.to_owned(),
                     created: Utc::now(),
                     used: false,
+                    issued_token: None,
                 },
             );
             redirect_to(&format!("{redirect}?code={code}&state={st}"))
@@ -514,8 +575,9 @@ fn urlencode(s: &str) -> String {
         .collect()
 }
 
+/// 許可・キャンセルはフォーム POST の応答なので 303（契約 v1.1）。
 fn redirect_to(location: &str) -> Response {
-    let mut r = StatusCode::FOUND.into_response();
+    let mut r = StatusCode::SEE_OTHER.into_response();
     if let Ok(v) = location.parse() {
         r.headers_mut().insert(header::LOCATION, v);
     }
@@ -544,8 +606,31 @@ async fn token(State(state): State<Shared>, headers: HeaderMap, body: Bytes) -> 
         );
     };
     let mut g = lock(&state);
+    if g.cfg.token_issuance_paused {
+        drop(g);
+        let r = error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "SERVICE_UNAVAILABLE",
+            "トークンの発行を停止しています",
+            json!({}),
+        );
+        record_status(&state, Endpoint::Token, false, ua, &r);
+        return r;
+    }
+    if g.cfg.banned {
+        drop(g);
+        let r = error(
+            StatusCode::FORBIDDEN,
+            "FORBIDDEN",
+            "利用できません",
+            json!({}),
+        );
+        record_status(&state, Endpoint::Token, false, ua, &r);
+        return r;
+    }
     let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .encode(sha2::Sha256::digest(req.code_verifier.as_bytes()));
+    let mut revoke: Option<String> = None;
     let valid = match g.codes.get_mut(&req.code) {
         Some(c)
             if !c.used
@@ -558,11 +643,18 @@ async fn token(State(state): State<Shared>, headers: HeaderMap, body: Bytes) -> 
             true
         }
         Some(c) => {
+            // 使用済みのコードが再提示されたら、そのコードで発行済みのトークンも失効させる。
+            if c.used {
+                revoke = c.issued_token.take();
+            }
             c.used = true;
             false
         }
         None => false,
     };
+    if let Some(t) = revoke {
+        g.tokens.remove(&t);
+    }
     if !valid {
         drop(g);
         let r = error(
@@ -574,9 +666,12 @@ async fn token(State(state): State<Shared>, headers: HeaderMap, body: Bytes) -> 
         record_status(&state, Endpoint::Token, false, ua, &r);
         return r;
     }
-    let t = format!("mock_{}", random_string(32));
+    let t = new_token();
     let name = g.cfg.user_name.clone();
     g.tokens.insert(t.clone(), name.clone());
+    if let Some(c) = g.codes.get_mut(&req.code) {
+        c.issued_token = Some(t.clone());
+    }
     let limits = limits_json(&g, Some(&t));
     drop(g);
     record(
@@ -652,6 +747,12 @@ async fn me(State(state): State<Shared>, headers: HeaderMap) -> Response {
     let g = lock(&state);
     let r = match check_token(&g, &headers) {
         Err(r) => r.into_response(),
+        Ok(Some(_)) if g.cfg.banned => error(
+            StatusCode::FORBIDDEN,
+            "FORBIDDEN",
+            "利用できません",
+            json!({}),
+        ),
         Ok(t) => {
             let user = t
                 .as_ref()
@@ -678,6 +779,9 @@ fn sniff(head: &[u8]) -> Option<&'static str> {
     if head.len() >= 12 && &head[..4] == b"RIFF" && &head[8..12] == b"WEBP" {
         return Some("IMAGE");
     }
+    if head.len() >= 12 && &head[..4] == b"RIFF" && &head[8..12] == b"AVI " {
+        return Some("VIDEO");
+    }
     if head.len() >= 8 && matches!(&head[4..8], b"ftyp" | b"moov" | b"mdat" | b"wide" | b"free") {
         return Some("VIDEO");
     }
@@ -691,14 +795,14 @@ async fn quick(State(state): State<Shared>, headers: HeaderMap, mut mp: Multipar
     let ua = user_agent(&headers);
     let authorized = bearer(&headers).is_some();
     // 本文を先に読み切る（台本でエラーを返す場合も、送信自体は完了させる）。
-    let mut file: Option<(String, Bytes)> = None;
+    let mut file: Option<(Option<String>, Bytes)> = None;
     let mut quality: Option<String> = None;
     loop {
         match mp.next_field().await {
             Ok(Some(field)) => {
                 let name = field.name().unwrap_or_default().to_owned();
                 if name == "file" {
-                    let fname = field.file_name().unwrap_or("upload").to_owned();
+                    let fname = field.file_name().map(str::to_owned);
                     match field.bytes().await {
                         Ok(b) => file = Some((fname, b)),
                         Err(_) => {
@@ -730,7 +834,7 @@ async fn quick(State(state): State<Shared>, headers: HeaderMap, mut mp: Multipar
         authorized,
         user_agent: ua,
         quality: quality.clone(),
-        file_name: file.as_ref().map(|f| f.0.clone()),
+        file_name: file.as_ref().and_then(|f| f.0.clone()),
         file_len: file.as_ref().map(|f| f.1.len() as u64),
         status: 0,
     };
@@ -765,7 +869,7 @@ async fn quick(State(state): State<Shared>, headers: HeaderMap, mut mp: Multipar
 fn quick_inner(
     state: &Shared,
     headers: &HeaderMap,
-    file: Option<(String, Bytes)>,
+    file: Option<(Option<String>, Bytes)>,
     quality: Option<&str>,
 ) -> Response {
     let mut g = lock(state);
@@ -773,7 +877,7 @@ fn quick_inner(
         Ok(t) => t,
         Err(r) => return r.into_response(),
     };
-    let Some((_, bytes)) = file else {
+    let Some((file_name, bytes)) = file else {
         return error(
             StatusCode::BAD_REQUEST,
             "INVALID_REQUEST",
@@ -781,6 +885,23 @@ fn quick_inner(
             json!({}),
         );
     };
+    // ファイル名付きのファイルパートでなければ 400（契約 v1.1）。
+    let Some(file_name) = file_name.filter(|n| !n.is_empty()) else {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "INVALID_REQUEST",
+            "file はファイル名付きで送ってください",
+            json!({}),
+        );
+    };
+    if g.cfg.banned && token.is_some() {
+        return error(
+            StatusCode::FORBIDDEN,
+            "FORBIDDEN",
+            "利用できません",
+            json!({}),
+        );
+    }
     if let Some(q) = quality
         && q != "original"
         && q != "shrink"
@@ -800,6 +921,25 @@ fn quick_inner(
             json!({}),
         );
     };
+    // 拡張子とマジックバイトの種別が食い違えば 415。
+    let ext = file_name
+        .rsplit('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let ext_kind = match ext.as_str() {
+        "png" | "jpg" | "jpeg" | "webp" => Some("IMAGE"),
+        "mp4" | "mov" | "m4v" | "webm" | "mkv" | "avi" => Some("VIDEO"),
+        _ => None,
+    };
+    if ext_kind.is_some_and(|k| k != kind) {
+        return error(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "UNSUPPORTED_MEDIA",
+            "ファイルの中身と形式が一致しません",
+            json!({}),
+        );
+    }
     let authed = token.is_some();
     let cfg = g.cfg.clone();
     let max = match (kind, authed) {
@@ -828,7 +968,7 @@ fn quick_inner(
             StatusCode::TOO_MANY_REQUESTS,
             "DAILY_LIMIT_EXCEEDED",
             "今日の上限に達しました",
-            json!({ "resetsAt": next_reset(Utc::now()).to_rfc3339() }),
+            json!({ "resetsAt": next_reset(Utc::now()).to_rfc3339(), "dailyLimit": limit }),
         );
     }
     g.daily.insert(identity, used + 1);

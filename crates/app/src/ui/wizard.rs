@@ -258,10 +258,7 @@ impl Wizard {
             }
             LoginState::Failed { code } => {
                 ui.label(widgets::title("連携できませんでした", p));
-                ui.label(widgets::body(
-                    "許可がキャンセルされたか、時間切れになりました。もう一度お試しください。",
-                    p,
-                ));
+                ui.label(widgets::body(login_failure_text(&code), p));
                 ui.add_space(8.0);
                 widgets::card(ui, p, |ui| {
                     ui.horizontal(|ui| {
@@ -321,6 +318,17 @@ impl Wizard {
             }
         });
         action
+    }
+}
+
+/// 連携の失敗の説明。403（BAN）と 503（発行停止中）は再試行やキャンセルとは別の案内にする（契約 v1.1）。
+pub fn login_failure_text(code: &str) -> &'static str {
+    match code {
+        "FORBIDDEN" => "このアカウントではClipshare Quickを利用できません。",
+        "SERVICE_UNAVAILABLE" => {
+            "現在、新しい連携を受け付けていません。時間をおいてお試しください。"
+        }
+        _ => "許可がキャンセルされたか、時間切れになりました。もう一度お試しください。",
     }
 }
 

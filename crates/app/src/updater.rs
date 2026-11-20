@@ -106,6 +106,27 @@ async fn check(shared: &Arc<Shared>, user_initiated: bool) {
                 );
             }
         }
+        Ok(UpdateDecision::ManualOnly { version, notes }) => {
+            let v = format!("v{version}");
+            tracing::info!(version = %v, "新しいバージョンがあります（検証用のハッシュが無いためダウンロードページへ案内）");
+            set_found(None);
+            shared.set_update_state(UpdateState::ManualAvailable {
+                version: v.clone(),
+                notes,
+            });
+            if !user_initiated {
+                crate::toast::show(
+                    shared,
+                    &crate::toast::ToastSpec {
+                        title: "新しいバージョンがあります".into(),
+                        body: format!("v{} → {v}", cq_core::APP_VERSION),
+                        buttons: vec![],
+                        tag: Some("update"),
+                        launch: crate::toast::ToastAction::Update,
+                    },
+                );
+            }
+        }
         Ok(UpdateDecision::UpToDate | UpdateDecision::NoAsset) => {
             if user_initiated {
                 shared.set_update_state(UpdateState::UpToDate);

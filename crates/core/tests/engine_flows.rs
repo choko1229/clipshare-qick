@@ -884,3 +884,192 @@ async fn photo_modified_after_upload_is_not_sent_again() {
     tokio::time::sleep(Duration::from_millis(2_500)).await;
     assert_eq!(mock.requests_to(Endpoint::Quick).len(), 1);
 }
+
+// ---- 契約 v1.1 ----
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v11_forbidden_blocks_uploads_without_falling_back_to_anonymous() {
+    let _slot = slot().await;
+    let mock = MockServer::start(MockConfig::default()).await.unwrap();
+    let mut h = Harness::new(&mock.base_url(), |_| {}).await;
+    login(&h).await;
+    mock.configure(|c| c.banned = true);
+    h.photo("banned1.png", 8, 8);
+    h.next_event(|e| matches!(e, EngineEvent::AccountBlocked))
+        .await;
+    let s = h.wait_for("利用停止", |s| s.blocked).await;
+    assert_eq!(s.tray, cq_core::engine::TrayState::Error);
+    // 再ログインを求めない（BAN は再認可で解決しない）
+    assert!(matches!(s.account, AccountView::LoggedIn { .. }));
+    h.photo("banned2.png", 8, 8);
+    tokio::time::sleep(Duration::from_millis(1_500)).await;
+    let quick = mock.requests_to(Endpoint::Quick);
+    assert!(quick.iter().all(|r| r.authorized), "匿名で送っていない");
+    let names: Vec<_> = quick.iter().filter_map(|r| r.file_name.clone()).collect();
+    assert!(
+        !names.contains(&"banned2.png".to_owned()),
+        "停止後の写真は送らない: {names:?}"
+    );
+    // 解除されたら上限情報の取得で戻る
+    mock.configure(|c| c.banned = false);
+    h.engine.refresh_limits().await;
+    assert!(!h.snap().blocked);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v11_html_413_and_pixel_limit_are_shrunk_and_resent() {
+    let _slot = slot().await;
+    let mock = MockServer::start(MockConfig::default()).await.unwrap();
+    let mut h = Harness::new(&mock.base_url(), |_| {}).await;
+    mock.push(
+        Endpoint::Quick,
+        Scripted::Raw {
+            status: 413,
+            content_type: "text/html".into(),
+            body: "<html><head><title>413 Request Entity Too Large</title></head><body>nginx</body></html>".into(),
+        },
+    );
+    h.photo("nginx.png", 2200, 1100);
+    h.next_event(|e| matches!(e, EngineEvent::Shrunk { .. }))
+        .await;
+    h.next_event(|e| matches!(e, EngineEvent::Uploaded { .. }))
+        .await;
+    mock.push_error(
+        Endpoint::Quick,
+        413,
+        "SIZE_LIMIT_EXCEEDED",
+        json!({ "limitBytes": 52428800, "kind": "IMAGE", "limitPixels": 100000000 }),
+    );
+    h.photo("pixels.png", 2200, 1100);
+    h.next_event(|e| matches!(e, EngineEvent::Shrunk { .. }))
+        .await;
+    h.next_event(|e| matches!(e, EngineEvent::Uploaded { .. }))
+        .await;
+    let reqs = mock.requests_to(Endpoint::Quick);
+    assert_eq!(reqs.len(), 4);
+    assert_eq!(reqs[1].quality.as_deref(), Some("shrink"));
+    assert_eq!(reqs[3].quality.as_deref(), Some("shrink"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v11_daily_limit_details_are_used() {
+    let _slot = slot().await;
+    let mock = MockServer::start(MockConfig::default()).await.unwrap();
+    let mut h = Harness::new(&mock.base_url(), |_| {}).await;
+    mock.push_error(
+        Endpoint::Quick,
+        429,
+        "DAILY_LIMIT_EXCEEDED",
+        json!({ "resetsAt": "2099-01-01T15:00:00Z", "dailyLimit": 7 }),
+    );
+    h.photo("d.png", 8, 8);
+    let ev = h
+        .next_event(|e| matches!(e, EngineEvent::DailyLimitReached { .. }))
+        .await;
+    assert!(matches!(
+        ev,
+        EngineEvent::DailyLimitReached { limit: Some(7), .. }
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v11_token_format_issuance_pause_and_ban_at_login() {
+    let _slot = slot().await;
+    let mock = MockServer::start(MockConfig::default()).await.unwrap();
+    let mut h = Harness::new(&mock.base_url(), |_| {}).await;
+    // 許可のリダイレクトは 303、URL には device_platform が付く
+    let session = h.engine.start_login().await.unwrap();
+    let url = session.browser_url().clone();
+    assert!(
+        url.query_pairs()
+            .any(|(k, v)| k == "device_platform" && v.starts_with("Windows"))
+    );
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let r = client.get(url.as_str()).send().await.unwrap();
+    assert_eq!(r.status().as_u16(), 303);
+    let loc = r
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let (res, cb) = tokio::join!(session.finish(), client.get(loc).send());
+    res.unwrap();
+    // ループバックは Clipshare の完了画面へ戻す
+    let cb = cb.unwrap();
+    assert_eq!(cb.status().as_u16(), 302);
+    assert!(
+        cb.headers()
+            .get("location")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .ends_with("/qick/authorize/complete")
+    );
+    let t = h.tokens.load().unwrap().unwrap();
+    assert!(t.expose().starts_with("csq_") && t.expose().len() == 47);
+
+    // トークンありのアップロードには deleteToken が無い
+    h.photo("authed.png", 8, 8);
+    h.next_event(|e| matches!(e, EngineEvent::Uploaded { .. }))
+        .await;
+    let s = h
+        .wait_for("完了", |s| {
+            s.history
+                .first()
+                .is_some_and(|e| e.status == EntryStatus::Done)
+        })
+        .await;
+    assert!(s.history[0].delete_token.is_none());
+    assert!(!s.history[0].anonymous);
+
+    h.engine.logout().await.unwrap();
+    mock.configure(|c| c.token_issuance_paused = true);
+    let session = h.engine.start_login().await.unwrap();
+    let url = session.browser_url().clone();
+    let (res, ()) = tokio::join!(session.finish(), act_as_browser(&url));
+    assert_eq!(res.unwrap_err().code(), "SERVICE_UNAVAILABLE");
+
+    mock.configure(|c| {
+        c.token_issuance_paused = false;
+        c.banned = true;
+    });
+    let session = h.engine.start_login().await.unwrap();
+    let url = session.browser_url().clone();
+    let (res, ()) = tokio::join!(session.finish(), act_as_browser(&url));
+    assert_eq!(res.unwrap_err().code(), "FORBIDDEN");
+    assert!(h.tokens.load().unwrap().is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v11_mock_rejects_nameless_part_and_mismatched_type() {
+    let _slot = slot().await;
+    let mock = MockServer::start(MockConfig::default()).await.unwrap();
+    let client = reqwest::Client::new();
+    let png = {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("a.png");
+        write_png(&p, 4, 4);
+        std::fs::read(&p).unwrap()
+    };
+    let url = format!("{}/api/v1/quick", mock.base_url());
+    let nameless =
+        reqwest::multipart::Form::new().part("file", reqwest::multipart::Part::bytes(png.clone()));
+    let r = client.post(&url).multipart(nameless).send().await.unwrap();
+    assert_eq!(r.status().as_u16(), 400);
+    let mismatched = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(png).file_name("clip.mp4"),
+    );
+    let r = client
+        .post(&url)
+        .multipart(mismatched)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 415);
+}

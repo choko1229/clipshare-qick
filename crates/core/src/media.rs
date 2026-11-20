@@ -14,7 +14,7 @@ pub enum MediaKind {
 }
 
 const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg", "webp"];
-const VIDEO_EXT: &[&str] = &["mp4", "mov", "webm", "m4v"];
+const VIDEO_EXT: &[&str] = &["mp4", "mov", "webm", "m4v", "mkv", "avi"];
 
 /// サイズ超過時の縮小で使う長辺の長さ（サーバーの「縮小」と同じ）。
 pub const SHRINK_LONG_EDGE: u32 = 2000;
@@ -54,6 +54,8 @@ pub fn mime_for(p: &Path) -> &'static str {
         "mp4" | "m4v" => "video/mp4",
         "mov" => "video/quicktime",
         "webm" => "video/webm",
+        "mkv" => "video/x-matroska",
+        "avi" => "video/x-msvideo",
         _ => "application/octet-stream",
     }
 }
@@ -67,6 +69,9 @@ pub fn sniff(head: &[u8]) -> Option<MediaKind> {
     if head.len() >= 12 && &head[..4] == b"RIFF" && &head[8..12] == b"WEBP" {
         return Some(MediaKind::Image);
     }
+    if head.len() >= 12 && &head[..4] == b"RIFF" && &head[8..12] == b"AVI " {
+        return Some(MediaKind::Video);
+    }
     // ISO BMFF（mp4/mov/m4v）: 4..8 が "ftyp"。古い mov は moov/mdat/wide/free で始まることがある。
     if head.len() >= 8 {
         let t = &head[4..8];
@@ -75,7 +80,7 @@ pub fn sniff(head: &[u8]) -> Option<MediaKind> {
         }
     }
     if starts(b"\x1A\x45\xDF\xA3") {
-        return Some(MediaKind::Video); // WebM (EBML)
+        return Some(MediaKind::Video); // WebM / MKV (EBML)
     }
     None
 }
@@ -200,6 +205,15 @@ mod tests {
         assert_eq!(sniff(b"RIFF\0\0\0\0WEBPVP8 "), Some(MediaKind::Image));
         assert_eq!(sniff(b"\0\0\0\x20ftypisom"), Some(MediaKind::Video));
         assert_eq!(sniff(b"\x1A\x45\xDF\xA3\x01"), Some(MediaKind::Video));
+        assert_eq!(sniff(b"RIFF\0\0\0\0AVI LIST"), Some(MediaKind::Video));
+        assert_eq!(
+            MediaKind::from_path(Path::new("a.mkv")),
+            Some(MediaKind::Video)
+        );
+        assert_eq!(
+            MediaKind::from_path(Path::new("a.AVI")),
+            Some(MediaKind::Video)
+        );
         assert_eq!(sniff(b"hello world"), None);
         assert_eq!(sniff(b""), None);
     }

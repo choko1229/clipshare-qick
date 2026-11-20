@@ -38,6 +38,7 @@ pub enum ToastAction {
     Login,
     Resume,
     Update,
+    ManagePage,
     Dismiss,
 }
 
@@ -50,6 +51,7 @@ impl ToastAction {
             Self::Login => "login".into(),
             Self::Resume => "resume".into(),
             Self::Update => "update".into(),
+            Self::ManagePage => "manage".into(),
             Self::Dismiss => "dismiss".into(),
         }
     }
@@ -60,6 +62,7 @@ impl ToastAction {
             "login" => Self::Login,
             "resume" => Self::Resume,
             "update" => Self::Update,
+            "manage" => Self::ManagePage,
             "dismiss" => Self::Dismiss,
             _ => {
                 if let Some(u) = s.strip_prefix("open:") {
@@ -79,6 +82,7 @@ impl ToastAction {
             Self::Login => Command::Login,
             Self::Resume => Command::SetAutoUpload(true),
             Self::Update => Command::Open(Screen::Update),
+            Self::ManagePage => Command::OpenManagePage,
             Self::Dismiss => return None,
         })
     }
@@ -398,6 +402,16 @@ pub fn spec_for(ev: &EngineEvent) -> Option<ToastSpec> {
                 )
             }
         }
+        // 403（BAN など）は再ログインでは解決しないため、アカウントの確認を案内する（契約 v1.1）。
+        EngineEvent::AccountBlocked => spec(
+            "このアカウントでは利用できません".into(),
+            "Clipshareでアカウントの状態を確認してください。".into(),
+            vec![ToastButton {
+                label: "Webで確認",
+                action: ToastAction::ManagePage,
+            }],
+            None,
+        ),
         EngineEvent::AuthExpired => spec(
             "連携が切れました".into(),
             // デザインの「バナー付き・1日5件で動作します」は確定仕様（匿名へ切り替えない）と矛盾するため置き換えた（QUESTIONS Q-003）。
@@ -440,7 +454,12 @@ pub fn spec_for(ev: &EngineEvent) -> Option<ToastSpec> {
             ..
         } if !matches!(
             code.as_str(),
-            "DAILY_LIMIT_EXCEEDED" | "CANCELLED" | "UNAUTHORIZED" | "VIDEO_TOO_LARGE"
+            "DAILY_LIMIT_EXCEEDED"
+                | "CANCELLED"
+                | "UNAUTHORIZED"
+                | "VIDEO_TOO_LARGE"
+                | "FORBIDDEN"
+                | "AUTO_UPLOAD_OFF"
         ) =>
         {
             spec(
@@ -514,6 +533,7 @@ mod tests {
             ToastAction::Login,
             ToastAction::Resume,
             ToastAction::Update,
+            ToastAction::ManagePage,
             ToastAction::Dismiss,
         ] {
             assert_eq!(ToastAction::decode(&a.encode()), Some(a));

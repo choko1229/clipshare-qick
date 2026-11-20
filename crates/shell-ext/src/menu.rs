@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use cq_ipc::ShareQuality;
 
 const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg", "webp"];
-const VIDEO_EXT: &[&str] = &["mp4", "mov", "webm", "m4v"];
+const VIDEO_EXT: &[&str] = &["mp4", "mov", "webm", "m4v", "mkv", "avi"];
 
 /// 選択されたファイルの内訳。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -56,6 +56,8 @@ impl AuthError {
             Self::Cancelled => "AUTH_CANCELLED",
             Self::Listen(_) => "AUTH_LISTEN_FAILED",
             Self::InvalidCallback => "AUTH_INVALID_CALLBACK",
+            // 503 はトークン発行の停止中にも返る（契約 v1.1）。
+            Self::Exchange(ApiError::Server { status: 503, .. }) => "SERVICE_UNAVAILABLE",
             Self::Exchange(e) => e.code(),
             Self::Url => "AUTH_INVALID_URL",
         }
@@ -109,10 +111,62 @@ fn random_from(alphabet: &[u8], len: usize) -> String {
         .collect()
 }
 
-/// 端末名（`device_name`、最大64文字）。
+/// 端末名（`device_name`）。契約 v1.1: 1〜64文字、前後の空白なし、制御文字なし。
 pub fn device_name() -> String {
-    let name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Windows PC".to_owned());
-    name.chars().take(64).collect()
+    sanitize_device_name(&std::env::var("COMPUTERNAME").unwrap_or_default())
+}
+
+pub fn sanitize_device_name(raw: &str) -> String {
+    let cleaned: String = raw.chars().filter(|c| !c.is_control()).collect();
+    let trimmed: String = cleaned.trim().chars().take(64).collect();
+    let trimmed = trimmed.trim().to_owned();
+    if trimmed.is_empty() {
+        "Windows PC".to_owned()
+    } else {
+        trimmed
+    }
+}
+
+/// 端末の OS 表記（`device_platform`、任意・最大32文字）。例: `Windows 11`。
+pub fn device_platform() -> String {
+    match windows_build() {
+        Some(b) if b >= 22000 => "Windows 11".to_owned(),
+        Some(_) => "Windows 10".to_owned(),
+        None => "Windows".to_owned(),
+    }
+}
+
+#[cfg(windows)]
+fn windows_build() -> Option<u32> {
+    use windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
+    use windows::core::w;
+    let mut buf = [0u16; 32];
+    let mut size = (buf.len() * 2) as u32;
+    // SAFETY: 出力バッファとその大きさを正しく渡している。
+    let r = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            w!(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"),
+            w!("CurrentBuild"),
+            RRF_RT_REG_SZ,
+            None,
+            Some(buf.as_mut_ptr().cast()),
+            Some(&mut size),
+        )
+    };
+    if r.is_err() {
+        return None;
+    }
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    String::from_utf16_lossy(buf.get(..len)?)
+        .trim()
+        .parse()
+        .ok()
+}
+
+#[cfg(not(windows))]
+fn windows_build() -> Option<u32> {
+    None
 }
 
 fn ct_eq(a: &[u8], b: &[u8]) -> bool {
@@ -131,6 +185,8 @@ pub struct PendingAuth {
     connection_code: String,
     redirect_uri: String,
     browser_url: Url,
+    /// 受信後にブラウザを戻す Clipshare の完了画面（契約 v1.1・任意）。
+    complete_url: Option<Url>,
 }
 
 /// ブラウザから受け取った認可コード。
@@ -142,6 +198,15 @@ pub struct AuthCode {
 impl PendingAuth {
     /// 待ち受けを開始する。`web_base` は Clipshare のURL。
     pub async fn start(web_base: &Url, device_name: &str) -> Result<Self, AuthError> {
+        Self::start_with_platform(web_base, device_name, None).await
+    }
+
+    /// `device_platform`（任意、最大32文字）つきで待ち受けを開始する。
+    pub async fn start_with_platform(
+        web_base: &Url,
+        device_name: &str,
+        device_platform: Option<&str>,
+    ) -> Result<Self, AuthError> {
         let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
             .await
             .map_err(AuthError::Listen)?;
@@ -161,7 +226,16 @@ impl PendingAuth {
             .append_pair("code_challenge", &pkce.challenge)
             .append_pair("code_challenge_method", "S256")
             .append_pair("connection_code", &connection_code)
-            .append_pair("device_name", device_name);
+            .append_pair("device_name", &sanitize_device_name(device_name));
+        if let Some(p) = device_platform {
+            let p: String = p.chars().filter(|c| !c.is_control()).take(32).collect();
+            if !p.trim().is_empty() {
+                browser_url
+                    .query_pairs_mut()
+                    .append_pair("device_platform", p.trim());
+            }
+        }
+        let complete_url = web_base.join("qick/authorize/complete").ok();
         tracing::info!(port, "ブラウザ認可の受信待ちを開始しました");
         Ok(Self {
             listener,
@@ -170,6 +244,7 @@ impl PendingAuth {
             connection_code,
             redirect_uri,
             browser_url,
+            complete_url,
         })
     }
 
@@ -245,7 +320,16 @@ impl PendingAuth {
         }
         let page = "<!doctype html><meta charset=\"utf-8\"><title>Clipshare Quick</title>\
                     <body style=\"font-family:sans-serif;padding:32px\">Clipshare Quick に戻ってください。</body>";
-        let _ = respond(&mut stream, "200 OK", page).await;
+        let succeeded = error.is_none() && code.as_deref().is_some_and(|c| !c.is_empty());
+        match (&self.complete_url, succeeded) {
+            // 許可された場合は Clipshare の「連携が完了しました」画面（デザイン07）へ戻す。
+            (Some(u), true) => {
+                let _ = redirect(&mut stream, u.as_str()).await;
+            }
+            _ => {
+                let _ = respond(&mut stream, "200 OK", page).await;
+            }
+        }
         if let Some(e) = error {
             tracing::info!(error = %e, "ブラウザで許可されませんでした");
             return Some(Err(AuthError::Denied));
@@ -297,6 +381,15 @@ fn parse_request_target(head: &str) -> Option<String> {
     (method == "GET" && target.starts_with('/')).then(|| target.to_owned())
 }
 
+async fn redirect(stream: &mut TcpStream, location: &str) -> std::io::Result<()> {
+    let resp = format!(
+        "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\n\
+         Cache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n\r\n"
+    );
+    stream.write_all(resp.as_bytes()).await?;
+    stream.shutdown().await
+}
+
 async fn respond(stream: &mut TcpStream, status: &str, body: &str) -> std::io::Result<()> {
     let resp = format!(
         "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\n\
@@ -336,6 +429,14 @@ mod tests {
             );
             assert!(!c.contains(['0', 'O', '1', 'I', 'L']));
         }
+    }
+
+    #[test]
+    fn device_name_is_sanitized() {
+        assert_eq!(sanitize_device_name("  DESKTOP-1  "), "DESKTOP-1");
+        assert_eq!(sanitize_device_name("\t\n"), "Windows PC");
+        assert_eq!(sanitize_device_name(&"x".repeat(100)).chars().count(), 64);
+        assert!(["Windows 11", "Windows 10", "Windows"].contains(&device_platform().as_str()));
     }
 
     #[test]
@@ -389,6 +490,12 @@ mod tests {
         assert_eq!(query(&p, "connection_code"), p.connection_code());
         assert!(query(&p, "redirect_uri").starts_with("http://127.0.0.1:"));
         assert_eq!(query(&p, "device_name"), "PC");
+        assert!(!u.query_pairs().any(|(k, _)| k == "device_platform"));
+        let p2 = PendingAuth::start_with_platform(&base, "  My\u{7}PC  ", Some("Windows 11"))
+            .await
+            .unwrap();
+        assert_eq!(query(&p2, "device_platform"), "Windows 11");
+        assert_eq!(query(&p2, "device_name"), "MyPC");
     }
 
     #[tokio::test]
@@ -405,7 +512,9 @@ mod tests {
             let r = get(port, "/callback?code=abc&state=wrong").await;
             assert!(r.starts_with("HTTP/1.1 400"));
             let r = get(port, &format!("/callback?code=thecode&state={state}")).await;
-            assert!(r.starts_with("HTTP/1.1 200"));
+            // 許可後は Clipshare の完了画面へ戻す
+            assert!(r.starts_with("HTTP/1.1 302"), "{r}");
+            assert!(r.contains("Location: https://clipshare.link/qick/authorize/complete"));
         };
         let (res, ()) = tokio::join!(waiter, client);
         assert_eq!(res.unwrap().code.expose(), "thecode");

@@ -46,6 +46,15 @@ impl HistoryPanel {
                         && let Some(a) = anonymous_notice(ui, &p, &snap) {
                             action = a;
                         }
+                if snap.blocked {
+                    widgets::tinted(ui, p.des, p.des, |ui| {
+                        ui.label(widgets::strong("このアカウントでは利用できません", &p));
+                        ui.label(widgets::muted("Clipshareでアカウントの状態を確認してください。", &p));
+                        if widgets::small(ui, &p, "Webで確認").clicked() {
+                            shared.send(Command::OpenManagePage);
+                        }
+                    });
+                }
                 if snap.offline {
                     widgets::tinted(ui, p.was, p.was, |ui| {
                         ui.label(widgets::strong("オフラインです", &p));

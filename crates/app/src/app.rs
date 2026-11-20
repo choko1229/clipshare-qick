@@ -62,6 +62,8 @@ pub enum Command {
     /// 履歴の URL を開く。
     OpenUrl(String),
     DeleteEntry(String),
+    /// Web の「連携アプリ」ページを開く。
+    OpenManagePage,
     Quit,
 }
 
@@ -91,6 +93,11 @@ pub enum UpdateState {
     Available {
         version: String,
         size_bytes: u64,
+        notes: String,
+    },
+    /// 新しい版はあるが SHA-256 が無いためアプリ内では適用しない（ダウンロードページへ案内）。
+    ManualAvailable {
+        version: String,
         notes: String,
     },
     Downloading {
