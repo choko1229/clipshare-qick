@@ -419,6 +419,7 @@ dependencies = [
  "cq-vr",
  "eframe",
  "egui",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
@@ -426,6 +427,7 @@ dependencies = [
  "tray-icon",
  "url",
  "windows",
+ "windows-future",
 ]
 
 [[package]]

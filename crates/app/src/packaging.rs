@@ -185,3 +185,172 @@ pub fn schedule_self_removal() -> bool {
         }
     }
 }
+
+/// 実行エイリアス（MSIX の `uap5:AppExecutionAlias`）。
+fn alias_exe() -> Option<std::path::PathBuf> {
+    std::env::var_os("LOCALAPPDATA").map(|l| {
+        std::path::PathBuf::from(l)
+            .join("Microsoft")
+            .join("WindowsApps")
+            .join("clipshare-quick.exe")
+    })
+}
+
+/// インストールしたアプリを起動する（初回設定へ進む）。
+pub fn launch_installed_app() {
+    if let Some(exe) = alias_exe() {
+        if let Err(e) = std::process::Command::new(exe).spawn() {
+            tracing::warn!(error = %e, "アプリを起動できませんでした");
+        }
+    }
+}
+
+/// エクスプローラーを再起動する（右クリックメニューを読み込み直すため。利用者がボタンを押したときだけ）。
+pub fn restart_explorer() {
+    let killed = std::process::Command::new("taskkill.exe")
+        .args(["/f", "/im", "explorer.exe"])
+        .status();
+    if killed.is_ok() {
+        let _ = std::process::Command::new("explorer.exe").spawn();
+    }
+}
+
+/// `.cer` から発行者と拇印（SHA-1）を読む。
+pub fn certificate_info(cer: &Path) -> Option<crate::setup::SignerInfo> {
+    use windows::Win32::Security::Cryptography::{
+        CERT_NAME_SIMPLE_DISPLAY_TYPE, CERT_SHA1_HASH_PROP_ID, CertCreateCertificateContext,
+        CertFreeCertificateContext, CertGetCertificateContextProperty, CertGetNameStringW,
+        PKCS_7_ASN_ENCODING, X509_ASN_ENCODING,
+    };
+    let bytes = std::fs::read(cer).ok()?;
+    // SAFETY: bytes は呼び出しの間有効。成功時の証明書コンテキストは最後に解放する。
+    unsafe {
+        let ctx = CertCreateCertificateContext(X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, &bytes);
+        if ctx.is_null() {
+            return None;
+        }
+        let mut name = [0u16; 256];
+        let n = CertGetNameStringW(ctx, CERT_NAME_SIMPLE_DISPLAY_TYPE, 0, None, Some(&mut name))
+            as usize;
+        let publisher = String::from_utf16_lossy(&name[..n.saturating_sub(1).min(name.len())]);
+        let mut hash = [0u8; 20];
+        let mut len = hash.len() as u32;
+        let ok = CertGetCertificateContextProperty(
+            ctx,
+            CERT_SHA1_HASH_PROP_ID,
+            Some(hash.as_mut_ptr().cast()),
+            &mut len,
+        )
+        .is_ok();
+        let _ = CertFreeCertificateContext(Some(ctx));
+        if !ok {
+            return None;
+        }
+        let fingerprint = hash
+            .iter()
+            .take(len as usize)
+            .map(|b| format!("{b:02X}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        Some(crate::setup::SignerInfo {
+            publisher,
+            fingerprint,
+        })
+    }
+}
+
+/// 自己署名の証明書を「信頼されたユーザー」に追加する（管理者の確認が出る。利用者が明示的に選んだときだけ）。
+pub fn trust_certificate(cer: &Path) -> Result<(), String> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject};
+    use windows::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
+    use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
+    let path = cer.display().to_string();
+    if path.contains('"') {
+        return Err("CERT_PATH_INVALID".into());
+    }
+    let params = HSTRING::from(format!("-addstore TrustedPeople \"{path}\""));
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOCLOSEPROCESS,
+        lpVerb: windows::core::w!("runas"),
+        lpFile: windows::core::w!("certutil.exe"),
+        lpParameters: windows::core::PCWSTR(params.as_ptr()),
+        nShow: SW_HIDE.0,
+        ..Default::default()
+    };
+    // SAFETY: info の文字列は呼び出しの間有効。プロセスハンドルは待ってから閉じる。
+    unsafe {
+        ShellExecuteExW(&mut info).map_err(|_| "CERT_TRUST_CANCELLED".to_owned())?;
+        if info.hProcess.is_invalid() {
+            return Err("CERT_TRUST_FAILED".into());
+        }
+        let _ = WaitForSingleObject(info.hProcess, INFINITE);
+        let mut code = 1u32;
+        let _ = GetExitCodeProcess(info.hProcess, &mut code);
+        let _ = CloseHandle(info.hProcess);
+        if code == 0 {
+            Ok(())
+        } else {
+            Err(format!("CERT_TRUST_FAILED (0x{code:08X})"))
+        }
+    }
+}
+
+/// パッケージをインストールする（進捗は 0〜100）。
+pub fn install_package(
+    path: &Path,
+    progress: impl Fn(f32) + Send + 'static,
+) -> Result<(), PackagingError> {
+    use windows::Management::Deployment::{DeploymentProgress, DeploymentResult};
+    use windows_future::AsyncOperationProgressHandler;
+    let uri = Uri::CreateUri(&HSTRING::from(format!(
+        "file:///{}",
+        path.display().to_string().replace('\\', "/")
+    )))
+    .map_err(|_| PackagingError::Path)?;
+    let pm = PackageManager::new().map_err(|e| PackagingError::Deploy(e.code().0 as u32))?;
+    let opts = AddPackageOptions::new().map_err(|e| PackagingError::Deploy(e.code().0 as u32))?;
+    let op = pm
+        .AddPackageByUriAsync(&uri, &opts)
+        .map_err(|e| PackagingError::Deploy(e.code().0 as u32))?;
+    let handler =
+        AsyncOperationProgressHandler::<DeploymentResult, DeploymentProgress>::new(move |_, p| {
+            progress(p.percentage as f32);
+            Ok(())
+        });
+    let _ = op.SetProgress(&handler);
+    op.get()
+        .map(|_| ())
+        .map_err(|e| PackagingError::Deploy(e.code().0 as u32))
+}
+
+/// デスクトップにショートカットを作る（実行エイリアスを指す）。
+pub fn create_desktop_shortcut() -> Result<(), String> {
+    use windows::Win32::System::Com::{
+        CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
+        CoTaskMemFree, IPersistFile,
+    };
+    use windows::Win32::UI::Shell::{
+        FOLDERID_Desktop, IShellLinkW, KF_FLAG_DEFAULT, SHGetKnownFolderPath, ShellLink,
+    };
+    use windows::core::Interface;
+    let target = alias_exe().ok_or("LOCALAPPDATA")?;
+    // SAFETY: このスレッドで COM を初期化し、各インターフェースはスコープ内で解放される。
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let desktop = SHGetKnownFolderPath(&FOLDERID_Desktop, KF_FLAG_DEFAULT, None)
+            .map_err(|e| e.to_string())?;
+        let dir = desktop.to_string().map_err(|e| e.to_string())?;
+        CoTaskMemFree(Some(desktop.0 as *const _));
+        let link: IShellLinkW =
+            CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(|e| e.to_string())?;
+        link.SetPath(&HSTRING::from(target.as_os_str()))
+            .map_err(|e| e.to_string())?;
+        let file: IPersistFile = link.cast().map_err(|e| e.to_string())?;
+        let lnk = std::path::PathBuf::from(dir).join("Clipshare Quick.lnk");
+        file.Save(&HSTRING::from(lnk.as_os_str()), true)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}

@@ -8,18 +8,6 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod actions;
-mod app;
-mod clipboard;
-mod host;
-mod packaging;
-mod platform;
-mod toast;
-mod tray;
-mod ui;
-mod updater;
-mod vr_bridge;
-
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -32,7 +20,8 @@ use cq_core::paths::AppPaths;
 use cq_core::settings::{Quality, SettingsStore};
 use cq_core::token_store::{CredentialManagerStore, target_name_for};
 
-use crate::app::{Command, Screen, SettingsTab, Shared};
+use clipshare_quick::app::{Command, Screen, SettingsTab, Shared};
+use clipshare_quick::{actions, clipboard, host, platform, toast, tray, ui, updater, vr_bridge};
 
 /// 起動引数。
 #[derive(Debug, Clone, PartialEq, Eq)]
