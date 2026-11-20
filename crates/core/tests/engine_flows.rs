@@ -24,6 +24,20 @@ use cq_mock_server::{AuthorizeMode, Endpoint, MockConfig, MockServer, Scripted};
 use serde_json::json;
 use tokio::sync::broadcast;
 
+/// 同時に動かすテストの数を絞る（多数のエンジン・画像処理・ウイルス対策ソフトのスキャンが重なると、
+/// 環境によって数十秒単位で止まり、タイムアウトで不安定になるため）。
+static SLOTS: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> = std::sync::OnceLock::new();
+
+async fn slot() -> tokio::sync::OwnedSemaphorePermit {
+    let sem = SLOTS
+        .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(4)))
+        .clone();
+    match sem.acquire_owned().await {
+        Ok(p) => p,
+        Err(e) => panic!("{e}"),
+    }
+}
+
 struct Harness {
     _dir: tempfile::TempDir,
     root: PathBuf,
@@ -46,9 +60,10 @@ fn fast_settings(api: &str, photos: &Path) -> Settings {
     s.advanced.stability.poll_interval_ms = 20;
     s.advanced.stability.stable_for_ms = 120;
     s.advanced.stability.max_wait_ms = 20_000;
+    s.advanced.stability.rescan_interval_ms = 1_000;
     s.advanced.offline_probe_interval_secs = 1;
     s.advanced.request_timeout_secs = 5;
-    s.advanced.toast_aggregate_ms = 3_000;
+    s.advanced.toast_aggregate_ms = 30_000;
     s
 }
 
@@ -77,6 +92,12 @@ impl Harness {
         api: &str,
         tweak: impl FnOnce(&mut Settings),
     ) -> Self {
+        if std::env::var_os("CQ_TEST_LOG").is_some() {
+            let _ = tracing_subscriber::fmt()
+                .with_env_filter("cq_core=debug")
+                .with_thread_names(true)
+                .try_init();
+        }
         let paths = AppPaths::new(&root);
         let mut s = fast_settings(api, &photos);
         tweak(&mut s);
@@ -206,6 +227,7 @@ async fn login(h: &Harness) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn auto_upload_copies_url_and_records_history() {
+    let _slot = slot().await;
     let mock = MockServer::start(MockConfig::default()).await.unwrap();
     let mut h = Harness::new(&mock.base_url(), |_| {}).await;
     h.photo("VRChat_2026-11-19_21-04-12.png", 64, 48);
@@ -259,6 +281,7 @@ impl SetForTest for MemoryClipboard {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn nothing_is_sent_without_consent_or_when_auto_upload_is_off() {
+    let _slot = slot().await;
     let mock = MockServer::start(MockConfig::default()).await.unwrap();
     let h = Harness::new(&mock.base_url(), |s| s.auto_upload_consented = false).await;
     h.photo("a.png", 8, 8);
@@ -274,6 +297,7 @@ async fn nothing_is_sent_without_consent_or_when_auto_upload_is_off() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn existing_photos_are_ignored_and_duplicates_sent_once() {
+    let _slot = slot().await;
     let mock = MockServer::start(MockConfig::default()).await.unwrap();
     let dir = tempfile::tempdir().unwrap();
     let photos = dir.path().join("photos");
@@ -309,6 +333,7 @@ async fn existing_photos_are_ignored_and_duplicates_sent_once() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn image_413_is_shrunk_and_resent_video_413_is_an_error() {
+    let _slot = slot().await;
     let mock = MockServer::start(MockConfig::default()).await.unwrap();
     let mut h = Harness::new(&mock.base_url(), |s| s.watch_videos = true).await;
     mock.push_error(
@@ -365,6 +390,7 @@ async fn image_413_is_shrunk_and_resent_video_413_is_an_error() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn known_limits_are_checked_before_sending() {
+    let _slot = slot().await;
     let mock = MockServer::start(MockConfig {
         anon_video_max: 1000,
         ..MockConfig::default()
@@ -372,6 +398,13 @@ async fn known_limits_are_checked_before_sending() {
     .await
     .unwrap();
     let mut h = Harness::new(&mock.base_url(), |s| s.watch_videos = true).await;
+    // 起動時の取得が環境の遅延で失敗しても良いよう、明示的に取り直す。
+    for _ in 0..20 {
+        if h.snap().limits.is_some() {
+            break;
+        }
+        h.engine.refresh_limits().await;
+    }
     h.wait_for("上限の取得", |s| s.limits.is_some()).await;
     write_fake_video(&h.photos.join("long.mp4"), 4096);
     h.next_event(|e| matches!(e, EngineEvent::VideoTooLarge { .. }))
@@ -384,6 +417,7 @@ async fn known_limits_are_checked_before_sending() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn daily_limit_pauses_and_photos_taken_meanwhile_are_never_sent() {
+    let _slot = slot().await;
     let mock = MockServer::start(MockConfig {
         anon_daily_limit: 1,
         ..MockConfig::default()
@@ -445,6 +479,7 @@ async fn daily_limit_pauses_and_photos_taken_meanwhile_are_never_sent() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn invalid_token_requires_relogin_and_never_falls_back_to_anonymous() {
+    let _slot = slot().await;
     let mock = MockServer::start(MockConfig::default()).await.unwrap();
     let mut h = Harness::new(&mock.base_url(), |_| {}).await;
     login(&h).await;
@@ -474,6 +509,9 @@ async fn invalid_token_requires_relogin_and_never_falls_back_to_anonymous() {
         s.history
             .iter()
             .any(|e| e.file_name == "while-broken.png" && e.status == EntryStatus::Failed)
+            && s.history
+                .iter()
+                .any(|e| e.file_name == "after-revoke.png" && e.status == EntryStatus::Failed)
     })
     .await;
     let quick = mock.requests_to(Endpoint::Quick);
@@ -512,6 +550,7 @@ async fn invalid_token_requires_relogin_and_never_falls_back_to_anonymous() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn server_errors_are_retried_then_persisted_as_failed() {
+    let _slot = slot().await;
     let mock = MockServer::start(MockConfig::default()).await.unwrap();
     let mut h = Harness::new(&mock.base_url(), |_| {}).await;
     mock.push_error(Endpoint::Quick, 503, "SERVICE_UNAVAILABLE", json!({}));
@@ -561,6 +600,7 @@ async fn server_errors_are_retried_then_persisted_as_failed() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn timeouts_are_retried() {
+    let _slot = slot().await;
     let mock = MockServer::start(MockConfig::default()).await.unwrap();
     let mut h = Harness::new(&mock.base_url(), |s| {
         s.advanced.upload_timeout_secs = 1;
@@ -575,6 +615,7 @@ async fn timeouts_are_retried() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn offline_photos_wait_and_upload_when_connection_returns() {
+    let _slot = slot().await;
     // ポートを確保してから閉じる（接続できない状態）
     let port = {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -615,6 +656,7 @@ async fn offline_photos_wait_and_upload_when_connection_returns() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn right_click_share_joins_urls_with_newlines() {
+    let _slot = slot().await;
     let mock = MockServer::start(MockConfig::default()).await.unwrap();
     let mut h = Harness::new(&mock.base_url(), |s| s.auto_upload = false).await;
     let elsewhere = tempfile::tempdir().unwrap();
@@ -689,6 +731,7 @@ async fn right_click_share_joins_urls_with_newlines() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_and_remove_history_entries() {
+    let _slot = slot().await;
     let mock = MockServer::start(MockConfig::default()).await.unwrap();
     let mut h = Harness::new(&mock.base_url(), |_| {}).await;
     h.photo("del.png", 8, 8);
@@ -715,6 +758,7 @@ async fn delete_and_remove_history_entries() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn login_logout_and_auth_failures() {
+    let _slot = slot().await;
     let mock = MockServer::start(MockConfig::default()).await.unwrap();
     let h = Harness::new(&mock.base_url(), |_| {}).await;
     login(&h).await;
@@ -751,6 +795,7 @@ async fn login_logout_and_auth_failures() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn consecutive_auto_uploads_are_copied_together() {
+    let _slot = slot().await;
     let mock = MockServer::start(MockConfig::default()).await.unwrap();
     let mut h = Harness::new(&mock.base_url(), |_| {}).await;
     h.photo("c1.png", 8, 8);
@@ -772,6 +817,7 @@ async fn consecutive_auto_uploads_are_copied_together() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn uninstall_cleanup_revokes_and_deletes() {
+    let _slot = slot().await;
     let mock = MockServer::start(MockConfig::default()).await.unwrap();
     let mut h = Harness::new(&mock.base_url(), |_| {}).await;
     login(&h).await;

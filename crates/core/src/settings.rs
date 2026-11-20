@@ -86,6 +86,8 @@ pub struct StabilitySettings {
     pub stable_for_ms: u64,
     /// これを超えても安定しなければ諦める。
     pub max_wait_ms: u64,
+    /// 通知の取りこぼしに備えてフォルダを走査し直す間隔（0 で無効）。
+    pub rescan_interval_ms: u64,
 }
 
 impl Default for StabilitySettings {
@@ -94,6 +96,7 @@ impl Default for StabilitySettings {
             poll_interval_ms: 500,
             stable_for_ms: 1_500,
             max_wait_ms: 120_000,
+            rescan_interval_ms: 15_000,
         }
     }
 }
@@ -133,6 +136,10 @@ pub struct AdvancedSettings {
     pub offline_probe_interval_secs: u64,
     /// ブラウザ認可の待ち時間。
     pub auth_timeout_secs: u64,
+    /// Web の「連携アプリ」管理ページのパス（API と同じホスト）。
+    pub manage_apps_path: String,
+    /// ダウンロードページ（更新履歴）のパス。
+    pub download_page_path: String,
 }
 
 pub const DEFAULT_API_BASE_URL: &str = "https://clipshare.link";
@@ -151,6 +158,8 @@ impl Default for AdvancedSettings {
             toast_aggregate_ms: 4_000,
             offline_probe_interval_secs: 30,
             auth_timeout_secs: 300,
+            manage_apps_path: "/qick/apps".to_owned(),
+            download_page_path: "/qick/download".to_owned(),
         }
     }
 }
@@ -281,6 +290,20 @@ impl Settings {
             3_600,
         )?;
         range("authTimeoutSecs", a.auth_timeout_secs, 10, 1_800)?;
+        for (name, path) in [
+            ("manageAppsPath", &a.manage_apps_path),
+            ("downloadPagePath", &a.download_page_path),
+        ] {
+            let ok = path.starts_with('/')
+                && !path.starts_with("//")
+                && path.len() <= 200
+                && path
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "/-_.".contains(c));
+            if !ok {
+                return Err(SettingsError::OutOfRange(name));
+            }
+        }
         Ok(())
     }
 }
@@ -490,6 +513,17 @@ mod tests {
         std::fs::write(&p, b"garbage").unwrap();
         let store = SettingsStore::load(&p);
         assert_eq!(store.get(), Settings::default());
+    }
+
+    #[test]
+    fn web_paths_must_be_same_host_paths() {
+        let mut s = Settings::default();
+        s.advanced.manage_apps_path = "//evil.example/x".into();
+        assert!(s.validate().is_err());
+        s.advanced.manage_apps_path = "https://evil.example".into();
+        assert!(s.validate().is_err());
+        s.advanced.manage_apps_path = "/qick/apps".into();
+        assert!(s.validate().is_ok());
     }
 
     #[test]

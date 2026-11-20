@@ -156,32 +156,78 @@ fn lock(s: &Shared) -> MutexGuard<'_, Inner> {
 pub struct MockServer {
     addr: SocketAddr,
     state: Shared,
-    task: tokio::task::JoinHandle<()>,
+    stop: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 impl Drop for MockServer {
     fn drop(&mut self) {
-        self.task.abort();
+        if let Some(s) = self.stop.take() {
+            let _ = s.send(());
+        }
     }
 }
 
 impl MockServer {
     /// 127.0.0.1 のランダムポート（`port = 0`）または指定ポートで起動する。
+    /// 専用のスレッドと実行環境で動かす（呼び出し側の実行環境が止まっても応答できるように）。
     pub async fn start_on(cfg: MockConfig, port: u16) -> std::io::Result<Self> {
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
-        let addr = listener.local_addr()?;
         let state: Shared = Arc::new(Mutex::new(Inner {
             cfg,
-            base_url: format!("http://{addr}"),
             ..Default::default()
         }));
-        let app = router(state.clone());
-        let task = tokio::spawn(async move {
-            if let Err(e) = axum::serve(listener, app).await {
-                tracing::error!(error = %e, "モックサーバーが停止しました");
-            }
-        });
-        Ok(Self { addr, state, task })
+        let (addr_tx, addr_rx) = std::sync::mpsc::channel::<std::io::Result<SocketAddr>>();
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let st = state.clone();
+        std::thread::Builder::new()
+            .name("cq-mock-server".into())
+            .spawn(move || {
+                let rt = match tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(2)
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        let _ = addr_tx.send(Err(e));
+                        return;
+                    }
+                };
+                rt.block_on(async move {
+                    let listener = match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
+                        Ok(l) => l,
+                        Err(e) => {
+                            let _ = addr_tx.send(Err(e));
+                            return;
+                        }
+                    };
+                    let addr = match listener.local_addr() {
+                        Ok(a) => a,
+                        Err(e) => {
+                            let _ = addr_tx.send(Err(e));
+                            return;
+                        }
+                    };
+                    lock(&st).base_url = format!("http://{addr}");
+                    let _ = addr_tx.send(Ok(addr));
+                    let served = axum::serve(listener, router(st))
+                        .with_graceful_shutdown(async {
+                            let _ = stop_rx.await;
+                        })
+                        .await;
+                    if let Err(e) = served {
+                        tracing::error!(error = %e, "モックサーバーが停止しました");
+                    }
+                });
+            })?;
+        let addr = tokio::task::spawn_blocking(move || addr_rx.recv())
+            .await
+            .map_err(std::io::Error::other)?
+            .map_err(std::io::Error::other)??;
+        Ok(Self {
+            addr,
+            state,
+            stop: Some(stop_tx),
+        })
     }
 
     pub async fn start(cfg: MockConfig) -> std::io::Result<Self> {

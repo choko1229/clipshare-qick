@@ -48,6 +48,8 @@ pub struct FolderStatus {
 #[derive(Debug)]
 pub struct FolderWatcher {
     _watchers: Vec<notify::RecommendedWatcher>,
+    /// 通知が 1 つも来ない（フォルダが無い）場合も再走査を続けられるよう、送信側を保持する。
+    _raw_tx: mpsc::UnboundedSender<PathBuf>,
     status: Vec<FolderStatus>,
     cancel: CancellationToken,
     task: JoinHandle<()>,
@@ -104,6 +106,7 @@ impl FolderWatcher {
         let task = tokio::spawn(process(opts, raw_rx, out, cancel.clone()));
         Self {
             _watchers: watchers,
+            _raw_tx: raw_tx,
             status,
             cancel,
             task,
@@ -137,6 +140,56 @@ fn kind_of(path: &Path, include_videos: bool) -> Option<MediaKind> {
     }
 }
 
+/// 書き込み完了を送ったときのファイルの状態（同じ状態なら再走査で送り直さない）。
+type Signature = (u64, Option<SystemTime>);
+
+fn signature(path: &Path) -> Option<Signature> {
+    let m = std::fs::metadata(path).ok()?;
+    Some((m.len(), m.modified().ok()))
+}
+
+/// 監視フォルダを走査し、監視開始後に作られた対象ファイルを返す（通知の取りこぼし対策）。
+/// 走査はフォルダ直下と 1 階層下（年月のサブフォルダ）だけ。監視開始後に更新されていないサブフォルダは見ない。
+pub fn scan_new_files(
+    folders: &[PathBuf],
+    started_at: SystemTime,
+    include_videos: bool,
+) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let recent = |m: &std::fs::Metadata| {
+        m.modified()
+            .is_ok_and(|t| t + Duration::from_secs(1) >= started_at)
+    };
+    let visit = |dir: &Path, top: bool, out: &mut Vec<PathBuf>, subdirs: &mut Vec<PathBuf>| {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            let Ok(ft) = e.file_type() else { continue };
+            let p = e.path();
+            if ft.is_dir() && top {
+                if e.metadata().is_ok_and(|m| recent(&m)) {
+                    subdirs.push(p);
+                }
+            } else if ft.is_file() && kind_of(&p, include_videos).is_some() {
+                if let Ok(m) = e.metadata() {
+                    if !created_before(&m, started_at) {
+                        out.push(p);
+                    }
+                }
+            }
+        }
+    };
+    for f in folders {
+        let mut subdirs = Vec::new();
+        visit(f, true, &mut out, &mut subdirs);
+        for d in subdirs {
+            visit(&d, false, &mut out, &mut Vec::new());
+        }
+    }
+    out
+}
+
 async fn process(
     opts: WatchOptions,
     mut raw_rx: mpsc::UnboundedReceiver<PathBuf>,
@@ -144,35 +197,68 @@ async fn process(
     cancel: CancellationToken,
 ) {
     let mut in_flight: HashSet<PathBuf> = HashSet::new();
-    let (done_tx, mut done_rx) = mpsc::unbounded_channel::<PathBuf>();
+    let mut emitted: std::collections::HashMap<PathBuf, Option<Signature>> =
+        std::collections::HashMap::new();
+    let (done_tx, mut done_rx) = mpsc::unbounded_channel::<(PathBuf, bool)>();
+    let rescan_ms = opts.stability.rescan_interval_ms;
+    let mut rescan = tokio::time::interval(Duration::from_millis(rescan_ms.max(100)));
+    rescan.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
-        tokio::select! {
+        let candidates: Vec<PathBuf> = tokio::select! {
             () = cancel.cancelled() => break,
-            Some(done) = done_rx.recv() => {
+            Some((done, ready)) = done_rx.recv() => {
                 in_flight.remove(&done);
-            }
-            next = raw_rx.recv() => {
-                let Some(path) = next else { break };
-                let Some(kind) = kind_of(&path, opts.include_videos) else { continue };
-                if !in_flight.insert(path.clone()) {
-                    continue;
-                }
-                let stability = opts.stability.clone();
-                let started_at = opts.started_at;
-                let out = out.clone();
-                let done_tx = done_tx.clone();
-                let cancel = cancel.clone();
-                tokio::spawn(async move {
-                    let ready = tokio::select! {
-                        r = settle(&path, &stability, started_at) => r,
-                        () = cancel.cancelled() => false,
-                    };
-                    if ready {
-                        let _ = out.send(ReadyFile { path: path.clone(), kind });
+                if ready {
+                    let sig = signature(&done);
+                    if emitted.len() >= 2_000 {
+                        emitted.clear();
                     }
-                    let _ = done_tx.send(path);
-                });
+                    emitted.insert(done, sig);
+                }
+                continue;
             }
+            _ = rescan.tick(), if rescan_ms > 0 => {
+                let folders = opts.folders.clone();
+                let (started, videos) = (opts.started_at, opts.include_videos);
+                let found = tokio::task::spawn_blocking(move || scan_new_files(&folders, started, videos))
+                    .await
+                    .unwrap_or_default();
+                found
+                    .into_iter()
+                    .filter(|p| emitted.get(p).is_none_or(|sig| *sig != signature(p)))
+                    .collect()
+            }
+            next = raw_rx.recv() => match next {
+                Some(p) => vec![p],
+                None => break,
+            },
+        };
+        for path in candidates {
+            tracing::debug!(file = %crate::logging::file_name_of(&path), "監視: 候補を受け取りました");
+            let Some(kind) = kind_of(&path, opts.include_videos) else {
+                continue;
+            };
+            if !in_flight.insert(path.clone()) {
+                continue;
+            }
+            let stability = opts.stability.clone();
+            let started_at = opts.started_at;
+            let out = out.clone();
+            let done_tx = done_tx.clone();
+            let cancel = cancel.clone();
+            tokio::spawn(async move {
+                let ready = tokio::select! {
+                    r = settle(&path, &stability, started_at) => r,
+                    () = cancel.cancelled() => false,
+                };
+                if ready {
+                    let _ = out.send(ReadyFile {
+                        path: path.clone(),
+                        kind,
+                    });
+                }
+                let _ = done_tx.send((path, ready));
+            });
         }
     }
 }
@@ -224,13 +310,17 @@ async fn settle(path: &Path, s: &StabilitySettings, started_at: SystemTime) -> b
     }
 }
 
-/// 他のプロセスが開いていないか（排他で開けるか）。
+/// 書き込み中のプロセスがいないか。
+///
+/// 読み取りの共有だけを許して開く。書き込み用に開いているプロセス（VRChat が保存中など）があれば共有違反で失敗し、
+/// 読み取りだけのプロセス（ウイルス対策ソフトのスキャンなど）は妨げにならない。
 #[cfg(windows)]
 fn can_open_exclusively(path: &Path) -> bool {
     use std::os::windows::fs::OpenOptionsExt;
+    const FILE_SHARE_READ: u32 = 0x0000_0001;
     std::fs::OpenOptions::new()
         .read(true)
-        .share_mode(0)
+        .share_mode(FILE_SHARE_READ)
         .open(path)
         .is_ok()
 }
@@ -250,6 +340,7 @@ mod tests {
             poll_interval_ms: 20,
             stable_for_ms: 150,
             max_wait_ms: 5_000,
+            rescan_interval_ms: 0,
         }
     }
 
@@ -354,6 +445,47 @@ mod tests {
         std::fs::write(dir.path().join("clip2.mp4"), b"v").unwrap();
         let got = recv_within(&mut rx, 3_000).await.unwrap();
         assert_eq!(got.kind, MediaKind::Video);
+    }
+
+    #[test]
+    fn rescan_finds_only_files_created_after_start() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("old.png"), b"x").unwrap();
+        let started = SystemTime::now() + Duration::from_secs(2);
+        assert!(scan_new_files(&[dir.path().to_path_buf()], started, false).is_empty());
+        let started = SystemTime::now() - Duration::from_secs(5);
+        let sub = dir.path().join("2026-11");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("new.png"), b"x").unwrap();
+        std::fs::write(sub.join("clip.mp4"), b"x").unwrap();
+        let found = scan_new_files(&[dir.path().to_path_buf()], started, false);
+        assert!(found.iter().any(|p| p.ends_with("new.png")));
+        assert!(!found.iter().any(|p| p.ends_with("clip.mp4")));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rescan_catches_files_when_notifications_are_missed() {
+        // 存在しないフォルダを監視して通知を受けられない状態にし、後からフォルダを作る
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("late");
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut st = fast();
+        st.rescan_interval_ms = 200;
+        let _w = FolderWatcher::start(
+            WatchOptions {
+                folders: vec![folder.clone()],
+                include_videos: false,
+                stability: st,
+                started_at: SystemTime::now() - Duration::from_secs(5),
+            },
+            tx,
+        );
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("a.png"), b"x").unwrap();
+        let got = recv_within(&mut rx, 5_000).await.expect("再走査で見つかる");
+        assert!(got.path.ends_with("a.png"));
+        // 同じ状態のファイルは再走査で何度も送らない
+        assert!(recv_within(&mut rx, 800).await.is_none());
     }
 
     #[tokio::test(flavor = "multi_thread")]

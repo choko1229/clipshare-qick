@@ -64,16 +64,6 @@ pub struct PersistentState {
     /// 401 を受けて再ログインが必要な状態。
     pub needs_relogin: bool,
     pub last_update_check: Option<DateTime<Utc>>,
-    /// 「次回起動時に更新」を選んだ更新ファイル。
-    pub pending_update: Option<PendingUpdate>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PendingUpdate {
-    pub version: String,
-    pub file: PathBuf,
-    pub sha256: String,
 }
 
 /// 実行状態の保存先。

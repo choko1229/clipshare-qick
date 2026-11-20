@@ -119,6 +119,8 @@ pub enum EngineEvent {
     Failed {
         entry_id: String,
         file_name: String,
+        /// 失敗の種類（API のエラーコードなど）。
+        code: String,
         message: String,
     },
     DailyLimitReached {
@@ -619,11 +621,28 @@ impl Engine {
         lock(&self.inner.state).state.account.clone()
     }
 
+    /// 前回の更新確認の時刻。
+    pub fn last_update_check(&self) -> Option<DateTime<Utc>> {
+        lock(&self.inner.state).state.last_update_check
+    }
+
+    pub fn set_last_update_check(&self, t: DateTime<Utc>) {
+        let mut st = lock(&self.inner.state);
+        st.state.last_update_check = Some(t);
+        self.save_state(&st);
+    }
+
     // ---- 設定の操作 ----
 
+    /// 自動アップロードを切り替える。利用者が明示的に ON にした場合は、送信への同意として記録する。
     pub fn set_auto_upload(&self, enabled: bool) -> Result<(), EngineError> {
-        let before = self.inner.settings.get().auto_upload;
-        self.inner.settings.update(|s| s.auto_upload = enabled)?;
+        let before = self.inner.settings.get().auto_upload_active();
+        self.inner.settings.update(|s| {
+            s.auto_upload = enabled;
+            if enabled {
+                s.auto_upload_consented = true;
+            }
+        })?;
         if before != enabled {
             tracing::info!(enabled, "自動アップロードを切り替えました");
             self.emit(EngineEvent::AutoUploadChanged { enabled });
@@ -702,6 +721,7 @@ impl Engine {
 
     /// 書き込みが終わった新しいファイル。
     fn on_file_ready(&self, path: &Path, kind: MediaKind) {
+        tracing::debug!(file = %crate::logging::file_name_of(path), "書き込みが終わったファイルを受け取りました");
         let settings = self.inner.settings.get();
         let name = crate::logging::file_name_of(path);
         let Ok(fp) = Fingerprint::of(path) else {
@@ -784,9 +804,12 @@ impl Engine {
         if code != "DAILY_LIMIT_EXCEEDED" && code != "CANCELLED" {
             self.inner.unseen_error.store(true, Ordering::SeqCst);
         }
+        // イベントを受けた側が最新の状態を読めるよう、先にスナップショットを更新する。
+        self.publish();
         self.emit(EngineEvent::Failed {
             entry_id: id.to_owned(),
             file_name: name,
+            code: code.to_owned(),
             message: message.to_owned(),
         });
     }
