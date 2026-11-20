@@ -192,13 +192,13 @@ pub fn pick_folder(initial: Option<&Path>) -> Option<PathBuf> {
         dialog
             .SetOptions(opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM)
             .ok()?;
-        if let Some(dir) = initial.filter(|d| d.is_dir()) {
-            if let Ok(item) = SHCreateItemFromParsingName::<_, _, IShellItem>(
+        if let Some(dir) = initial.filter(|d| d.is_dir())
+            && let Ok(item) = SHCreateItemFromParsingName::<_, _, IShellItem>(
                 &HSTRING::from(dir.as_os_str()),
                 None,
-            ) {
-                let _ = dialog.SetFolder(&item);
-            }
+            )
+        {
+            let _ = dialog.SetFolder(&item);
         }
         dialog.Show(None::<HWND>).ok()?;
         let item = dialog.GetResult().ok()?;

@@ -75,14 +75,13 @@ pub fn apply_options(
             s.launch_at_startup = opts.launch_at_startup;
             s.context_menu_enabled = opts.context_menu;
             s.steamvr_enabled = opts.steamvr;
-            if let Some(f) = detected_folder {
-                if !s
+            if let Some(f) = detected_folder
+                && !s
                     .watch_folders
                     .iter()
                     .any(|x| cq_core::settings::folder_key(x) == cq_core::settings::folder_key(f))
-                {
-                    s.watch_folders.insert(0, f.to_path_buf());
-                }
+            {
+                s.watch_folders.insert(0, f.to_path_buf());
             }
         })
         .map_err(|e| e.to_string())?;
@@ -229,11 +228,11 @@ impl SetupApp {
                 }
                 ctx.request_repaint();
             };
-            if let Some(cer) = trust_cert {
-                if let Err(code) = crate::packaging::trust_certificate(&cer) {
-                    set(Page::Failed { step: 0, code });
-                    return;
-                }
+            if let Some(cer) = trust_cert
+                && let Err(code) = crate::packaging::trust_certificate(&cer)
+            {
+                set(Page::Failed { step: 0, code });
+                return;
             }
             set(Page::Installing {
                 step: 0,
@@ -273,15 +272,15 @@ impl SetupApp {
                 step: 4,
                 percent: 100.0,
             });
-            if let Some(root) = AppPaths::default_root() {
-                if let Err(e) = apply_options(&AppPaths::new(root), &opts, detected.path()) {
-                    tracing::warn!(error = %e, "初期設定を書き込めませんでした");
-                }
+            if let Some(root) = AppPaths::default_root()
+                && let Err(e) = apply_options(&AppPaths::new(root), &opts, detected.path())
+            {
+                tracing::warn!(error = %e, "初期設定を書き込めませんでした");
             }
-            if opts.desktop_shortcut {
-                if let Err(e) = crate::packaging::create_desktop_shortcut() {
-                    tracing::warn!(error = %e, "ショートカットを作れませんでした");
-                }
+            if opts.desktop_shortcut
+                && let Err(e) = crate::packaging::create_desktop_shortcut()
+            {
+                tracing::warn!(error = %e, "ショートカットを作れませんでした");
             }
             set(Page::Done);
         });
@@ -450,11 +449,10 @@ impl SetupApp {
                         if widgets::secondary(ui, &p, "オプションを変えて再試行").clicked() {
                             self.set_page(Page::Options);
                         }
-                        if widgets::secondary(ui, &p, "ログを開く").clicked() {
-                            if let Some(root) = AppPaths::default_root() {
+                        if widgets::secondary(ui, &p, "ログを開く").clicked()
+                            && let Some(root) = AppPaths::default_root() {
                                 crate::platform::open_path(&AppPaths::new(root).log_dir());
                             }
-                        }
                     });
                 }
             }

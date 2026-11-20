@@ -171,12 +171,12 @@ pub fn scan_new_files(
                 if e.metadata().is_ok_and(|m| recent(&m)) {
                     subdirs.push(p);
                 }
-            } else if ft.is_file() && kind_of(&p, include_videos).is_some() {
-                if let Ok(m) = e.metadata() {
-                    if !created_before(&m, started_at) {
-                        out.push(p);
-                    }
-                }
+            } else if ft.is_file()
+                && kind_of(&p, include_videos).is_some()
+                && let Ok(m) = e.metadata()
+                && !created_before(&m, started_at)
+            {
+                out.push(p);
             }
         }
     };

@@ -206,7 +206,8 @@ impl PendingAuth {
             if !peer.ip().is_loopback() {
                 continue;
             }
-            match tokio::time::timeout(Duration::from_secs(10), self.handle(stream)).await {
+            // ブラウザが投機的に開いて何も送らない接続で、本命の接続が待たされないよう短くする。
+            match tokio::time::timeout(Duration::from_secs(3), self.handle(stream)).await {
                 Ok(Some(result)) => return result,
                 Ok(None) => continue,
                 Err(_) => continue,

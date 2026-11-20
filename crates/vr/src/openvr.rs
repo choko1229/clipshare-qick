@@ -146,10 +146,10 @@ fn cstr(s: &str) -> Result<CString, VrError> {
 /// DLL の候補（実行ファイルと同じフォルダ → SteamVR のランタイム）。
 pub fn library_candidates() -> Vec<PathBuf> {
     let mut v = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            v.push(dir.join("openvr_api.dll"));
-        }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        v.push(dir.join("openvr_api.dll"));
     }
     if let Some(rt) = runtime_path() {
         v.push(rt.join("bin").join("win64").join("openvr_api.dll"));

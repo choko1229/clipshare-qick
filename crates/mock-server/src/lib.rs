@@ -781,15 +781,16 @@ fn quick_inner(
             json!({}),
         );
     };
-    if let Some(q) = quality {
-        if q != "original" && q != "shrink" {
-            return error(
-                StatusCode::BAD_REQUEST,
-                "INVALID_REQUEST",
-                "quality が不正です",
-                json!({}),
-            );
-        }
+    if let Some(q) = quality
+        && q != "original"
+        && q != "shrink"
+    {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "INVALID_REQUEST",
+            "quality が不正です",
+            json!({}),
+        );
     }
     let Some(kind) = sniff(&bytes) else {
         return error(

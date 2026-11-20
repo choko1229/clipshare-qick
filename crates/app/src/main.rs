@@ -199,7 +199,12 @@ fn main() {
         while let Some(req) = ipc_rx.recv().await {
             match req {
                 Request::Share { quality, paths } => {
-                    s.engine.share_files(&paths, quality_of(quality));
+                    if s.engine.settings().get().onboarding_completed {
+                        s.engine.share_files(&paths, quality_of(quality));
+                    } else {
+                        tracing::info!("初回設定の前のため、共有せずに初回設定を開きます");
+                        s.send(Command::Open(Screen::Wizard));
+                    }
                 }
                 Request::Show { view } => {
                     let screen = match view {
@@ -216,10 +221,11 @@ fn main() {
     let first = match &launch {
         _ if !onboarded => Some(Screen::Wizard),
         Launch::Background => None,
-        Launch::Share { quality, paths } => {
+        Launch::Share { quality, paths } if onboarded => {
             engine.share_files(paths, quality_of(*quality));
             None
         }
+        Launch::Share { .. } => Some(Screen::Wizard),
         Launch::Show(View::Settings) => Some(Screen::Settings(SettingsTab::Upload)),
         Launch::Normal | Launch::Show(View::History) => Some(Screen::History),
     };

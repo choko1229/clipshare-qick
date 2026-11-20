@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/choko1229/clipshare-qick"
-rust-version = "1.85"
+rust-version = "1.95"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

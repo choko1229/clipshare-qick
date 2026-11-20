@@ -41,13 +41,11 @@ impl HistoryPanel {
                 if !snap.history.is_empty() || !matches!(snap.account, AccountView::LoggedIn { .. }) || snap.offline {
                     self.controls(ui, &p, shared, &snap);
                 }
-                if let AccountView::Anonymous = snap.account {
-                    if !snap.history.is_empty() {
-                        if let Some(a) = anonymous_notice(ui, &p, &snap) {
+                if let AccountView::Anonymous = snap.account
+                    && !snap.history.is_empty()
+                        && let Some(a) = anonymous_notice(ui, &p, &snap) {
                             action = a;
                         }
-                    }
-                }
                 if snap.offline {
                     widgets::tinted(ui, p.was, p.was, |ui| {
                         ui.label(widgets::strong("オフラインです", &p));
@@ -148,20 +146,16 @@ fn anonymous_notice(ui: &mut Ui, p: &Palette, snap: &Snapshot) -> Option<Action>
     widgets::tinted(ui, p.was, p.was, |ui| {
         ui.horizontal(|ui| {
             ui.label(widgets::strong("未ログインで利用中", p));
-            if let Some(l) = &snap.limits {
-                if let Some(limit) = l.daily() {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(format!(
-                                "今日 {} / {} 件",
-                                l.daily_used.min(limit),
-                                limit
-                            ))
+            if let Some(l) = &snap.limits
+                && let Some(limit) = l.daily()
+            {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(format!("今日 {} / {} 件", l.daily_used.min(limit), limit))
                             .font(bold(12.0))
                             .color(p.wa),
-                        );
-                    });
-                }
+                    );
+                });
             }
         });
         ui.label(widgets::muted(
@@ -230,15 +224,15 @@ fn row(ui: &mut Ui, p: &Palette, shared: &Arc<Shared>, e: &HistoryEntry) {
                 if widgets::icon_button(ui, p, "🗑", "削除").clicked() {
                     shared.send(Command::DeleteEntry(e.id.clone()));
                 }
-                if widgets::icon_button(ui, p, "🌐", "ブラウザで開く").clicked() {
-                    if let Some(u) = &e.url {
-                        shared.send(Command::OpenUrl(u.clone()));
-                    }
+                if widgets::icon_button(ui, p, "🌐", "ブラウザで開く").clicked()
+                    && let Some(u) = &e.url
+                {
+                    shared.send(Command::OpenUrl(u.clone()));
                 }
-                if widgets::icon_button(ui, p, "📋", "URLをコピー").clicked() {
-                    if let Err(err) = shared.engine.copy_url(&e.id) {
-                        tracing::warn!(error = %err, "コピーできませんでした");
-                    }
+                if widgets::icon_button(ui, p, "📋", "URLをコピー").clicked()
+                    && let Err(err) = shared.engine.copy_url(&e.id)
+                {
+                    tracing::warn!(error = %err, "コピーできませんでした");
                 }
             }
             DisplayStatus::Processing => widgets::badge(ui, p, "処理中", Tone::Primary),
@@ -249,10 +243,10 @@ fn row(ui: &mut Ui, p: &Palette, shared: &Arc<Shared>, e: &HistoryEntry) {
             DisplayStatus::Failed => {
                 let retryable = e.failure.as_ref().is_none_or(|f| f.retryable);
                 if retryable {
-                    if widgets::small(ui, p, "再試行").clicked() {
-                        if let Err(err) = shared.engine.retry(&e.id) {
-                            tracing::warn!(error = %err, "再試行できませんでした");
-                        }
+                    if widgets::small(ui, p, "再試行").clicked()
+                        && let Err(err) = shared.engine.retry(&e.id)
+                    {
+                        tracing::warn!(error = %err, "再試行できませんでした");
                     }
                 } else if widgets::icon_button(ui, p, "✕", "履歴から消す").clicked() {
                     let _ = shared.engine.remove_entry(&e.id);

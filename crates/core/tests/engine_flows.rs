@@ -844,3 +844,43 @@ async fn uninstall_cleanup_revokes_and_deletes() {
     assert!(!h.root.join("history.json").exists());
     assert!(!h.root.join("settings.json").exists());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn leftover_token_without_account_is_not_treated_as_anonymous() {
+    let _slot = slot().await;
+    let mock = MockServer::start(MockConfig::default()).await.unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("data");
+    let photos = dir.path().join("photos");
+    std::fs::create_dir_all(&photos).unwrap();
+    // 実行状態（state.json）は無いが、資格情報マネージャーにはトークンが残っている状態
+    let tokens = Arc::new(MemoryTokenStore::default());
+    tokens
+        .save(&cq_core::secret::SecretString::new(mock.issue_token()))
+        .unwrap();
+    let mut h = Harness::with_dirs(dir, root, photos, tokens, &mock.base_url(), |_| {}).await;
+    h.wait_for("アカウントの復元", |s| {
+        matches!(s.account, AccountView::LoggedIn { .. })
+    })
+    .await;
+    h.photo("restored.png", 8, 8);
+    h.next_event(|e| matches!(e, EngineEvent::Uploaded { .. }))
+        .await;
+    let quick = mock.requests_to(Endpoint::Quick);
+    assert_eq!(quick.len(), 1);
+    assert!(quick[0].authorized, "トークンで送る（匿名にしない）");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn photo_modified_after_upload_is_not_sent_again() {
+    let _slot = slot().await;
+    let mock = MockServer::start(MockConfig::default()).await.unwrap();
+    let mut h = Harness::new(&mock.base_url(), |_| {}).await;
+    let p = h.photo("edited.png", 8, 8);
+    h.next_event(|e| matches!(e, EngineEvent::Uploaded { .. }))
+        .await;
+    // 外部ツールがメタデータを書き足した（サイズと更新時刻が変わる）
+    write_png(&p, 16, 16);
+    tokio::time::sleep(Duration::from_millis(2_500)).await;
+    assert_eq!(mock.requests_to(Endpoint::Quick).len(), 1);
+}

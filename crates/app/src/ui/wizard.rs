@@ -67,19 +67,19 @@ impl Wizard {
     fn finish(&self, shared: &Arc<Shared>) {
         let folder = self.folder.clone();
         let auto = self.auto_upload;
-        let r =
-            shared.engine.settings().update(|s| {
-                s.onboarding_completed = true;
-                s.auto_upload_consented = auto;
-                s.auto_upload = auto;
-                if let Some(f) = folder {
-                    if !s.watch_folders.iter().any(|x| {
-                        cq_core::settings::folder_key(x) == cq_core::settings::folder_key(&f)
-                    }) {
-                        s.watch_folders.insert(0, f);
-                    }
-                }
-            });
+        let r = shared.engine.settings().update(|s| {
+            s.onboarding_completed = true;
+            s.auto_upload_consented = auto;
+            s.auto_upload = auto;
+            if let Some(f) = folder
+                && !s
+                    .watch_folders
+                    .iter()
+                    .any(|x| cq_core::settings::folder_key(x) == cq_core::settings::folder_key(&f))
+            {
+                s.watch_folders.insert(0, f);
+            }
+        });
         if let Err(e) = r {
             tracing::error!(error = %e, "初回設定を保存できませんでした");
         } else {
@@ -164,10 +164,10 @@ impl Wizard {
                 } else {
                     "選択"
                 };
-                if widgets::secondary(ui, p, label).clicked() {
-                    if let Some(f) = crate::platform::pick_folder(self.folder.as_deref()) {
-                        self.folder = Some(f);
-                    }
+                if widgets::secondary(ui, p, label).clicked()
+                    && let Some(f) = crate::platform::pick_folder(self.folder.as_deref())
+                {
+                    self.folder = Some(f);
                 }
             });
             let note = if self.folder.is_some() {
@@ -212,12 +212,11 @@ impl Wizard {
                 ));
                 ui.add_space(8.0);
                 widgets::spinner(ui, p, 20.0);
-                if let LoginState::Idle = shared.login_state() {
-                    if let cq_core::engine::AccountView::LoggedIn { name } =
+                if let LoginState::Idle = shared.login_state()
+                    && let cq_core::engine::AccountView::LoggedIn { name } =
                         shared.engine.snapshot().borrow().account.clone()
-                    {
-                        return self.success(ui, p, &name);
-                    }
+                {
+                    return self.success(ui, p, &name);
                 }
                 bottom_bar(ui, p, |ui| {
                     if widgets::secondary(ui, p, "あとで連携する").clicked() {

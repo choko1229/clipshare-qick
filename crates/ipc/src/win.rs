@@ -206,8 +206,34 @@ pub fn send_request(request: &Request, connect_timeout: Duration) -> Result<Resp
     verify_server(&pipe, &sid)?;
     pipe.write_all(&encode(request)?)?;
     pipe.flush()?;
+    wait_readable(&pipe, RESPONSE_TIMEOUT)?;
     let line = read_line_limited(&mut pipe)?;
     decode(&line)
+}
+
+/// 応答を待つ上限。
+const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// 読めるデータが届くまで待つ（期限つき）。同期の ReadFile は期限を持てないため、先に確認する。
+fn wait_readable(pipe: &std::fs::File, timeout: Duration) -> Result<(), IpcError> {
+    use windows::Win32::System::Pipes::PeekNamedPipe;
+    let handle = HANDLE(pipe.as_raw_handle());
+    let deadline = Instant::now() + timeout;
+    loop {
+        let mut avail = 0u32;
+        // SAFETY: 開いているパイプのハンドルで、読み取りはせず残量だけを問い合わせる。
+        unsafe { PeekNamedPipe(handle, None, 0, None, Some(&mut avail), None) }
+            .map_err(|e| os(&e))?;
+        if avail > 0 {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(IpcError::Io(std::io::Error::from(
+                std::io::ErrorKind::TimedOut,
+            )));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[cfg(test)]

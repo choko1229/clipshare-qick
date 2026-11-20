@@ -115,10 +115,9 @@ impl SettingsWindow {
                 "自動アップロード",
                 "VRChatで撮影した写真を自動でアップロードします。",
                 |ui| widgets::toggle(ui, p, &mut on, "自動アップロード").changed(),
-            ) {
-                if let Err(e) = shared.engine.set_auto_upload(on) {
-                    self.error = Some(e.to_string());
-                }
+            ) && let Err(e) = shared.engine.set_auto_upload(on)
+            {
+                self.error = Some(e.to_string());
             }
             widgets::divider(ui, p);
             let mut copy = s.copy_url_after_upload;
@@ -166,10 +165,11 @@ impl SettingsWindow {
                 })
                 .response
                 .interact(egui::Sense::click());
-            if r.clicked() && !selected {
-                if let Err(e) = shared.engine.set_default_quality(q) {
-                    self.error = Some(e.to_string());
-                }
+            if r.clicked()
+                && !selected
+                && let Err(e) = shared.engine.set_default_quality(q)
+            {
+                self.error = Some(e.to_string());
             }
         }
         let snap = shared.engine.snapshot().borrow().clone();
@@ -280,19 +280,16 @@ impl SettingsWindow {
                 widgets::tinted(ui, p.was, p.was, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(widgets::strong("未ログインで利用中", p));
-                        if let Some(l) = snap.limits.as_ref() {
-                            if let Some(d) = l.daily() {
-                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    ui.label(
-                                        RichText::new(format!(
-                                            "今日 {} / {d} 件",
-                                            l.daily_used.min(d)
-                                        ))
+                        if let Some(l) = snap.limits.as_ref()
+                            && let Some(d) = l.daily()
+                        {
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(
+                                    RichText::new(format!("今日 {} / {d} 件", l.daily_used.min(d)))
                                         .font(bold(12.0))
                                         .color(p.wa),
-                                    );
-                                });
-                            }
+                                );
+                            });
                         }
                     });
                     for l in [
@@ -364,12 +361,11 @@ impl SettingsWindow {
                 }
             });
         }
-        if widgets::secondary(ui, p, "フォルダを追加").clicked() {
-            if let Some(f) =
+        if widgets::secondary(ui, p, "フォルダを追加").clicked()
+            && let Some(f) =
                 crate::platform::pick_folder(s.watch_folders.first().map(|x| x.as_path()))
-            {
-                self.save(shared, |x| x.watch_folders.push(f));
-            }
+        {
+            self.save(shared, |x| x.watch_folders.push(f));
         }
         ui.label(widgets::muted(
             "すでにある写真はアップロードしません。書き込みが終わった新しい写真だけを送ります。",

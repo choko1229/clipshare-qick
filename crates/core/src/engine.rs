@@ -253,6 +253,8 @@ struct Inner {
     clip_batch: Mutex<ClipBatch>,
     batches: Mutex<HashMap<String, Batch>>,
     watcher: Mutex<Option<FolderWatcher>>,
+    /// 監視しているフォルダと、その監視を始めた時刻（設定変更で監視し直しても、同じフォルダなら引き継ぐ）。
+    watch_started: Mutex<Option<(Vec<PathBuf>, SystemTime)>>,
     folders: Mutex<Vec<FolderStatus>>,
     shutdown: CancellationToken,
 }
@@ -327,11 +329,13 @@ impl Engine {
             clip_batch: Mutex::new(ClipBatch::default()),
             batches: Mutex::new(HashMap::new()),
             watcher: Mutex::new(None),
+            watch_started: Mutex::new(None),
             folders: Mutex::new(Vec::new()),
             shutdown: CancellationToken::new(),
         });
         let engine = Self { inner };
         engine.expire_pause();
+        engine.recover_orphaned_token();
         let pending = lock(&engine.inner.history).pending_ids();
         for id in pending {
             engine.enqueue(id, false);
@@ -491,7 +495,14 @@ impl Engine {
             (st.state.account.is_some(), st.state.needs_relogin)
         };
         if !has_account {
-            return Ok(None);
+            // 実行状態のファイルが失われても、資格情報マネージャーにトークンがあれば匿名にはしない。
+            return match self.inner.token_store.load() {
+                Ok(t) => Ok(t),
+                Err(e) => {
+                    tracing::warn!(error = %e, "トークンを読み込めません");
+                    Err(EngineError::NeedsRelogin)
+                }
+            };
         }
         if needs_relogin {
             return Err(EngineError::NeedsRelogin);
@@ -511,9 +522,52 @@ impl Engine {
         }
     }
 
+    /// 実行状態にアカウントが無いのにトークンが残っている場合、`/me` でアカウントを復元する。
+    fn recover_orphaned_token(&self) {
+        let has_account = lock(&self.inner.state).state.account.is_some();
+        if has_account || !matches!(self.inner.token_store.load(), Ok(Some(_))) {
+            return;
+        }
+        tracing::warn!("連携の記録が無いためトークンからアカウントを復元します");
+        let e = self.clone();
+        tokio::spawn(async move {
+            let Ok(Some(token)) = e.inner.token_store.load() else {
+                return;
+            };
+            match e.api().me(Some(&token)).await {
+                Ok(me) if me.authenticated => {
+                    if let Some(user) = me.user {
+                        let mut st = lock(&e.inner.state);
+                        st.state.account = Some(Account {
+                            user,
+                            token_id: String::new(),
+                            linked_at: Self::now(),
+                        });
+                        st.state.needs_relogin = false;
+                        e.save_state(&st);
+                    }
+                    *lock(&e.inner.limits) = Some(me.limits);
+                    e.publish();
+                }
+                Ok(_) | Err(ApiError::Unauthorized) => e.mark_needs_relogin(),
+                Err(err) => tracing::warn!(code = err.code(), "アカウントを復元できませんでした"),
+            }
+        });
+    }
+
     fn mark_needs_relogin(&self) {
         let changed = {
             let mut st = lock(&self.inner.state);
+            if st.state.account.is_none() && matches!(self.inner.token_store.load(), Ok(Some(_))) {
+                st.state.account = Some(Account {
+                    user: User {
+                        id: String::new(),
+                        name: "（不明）".to_owned(),
+                    },
+                    token_id: String::new(),
+                    linked_at: Self::now(),
+                });
+            }
             if st.state.account.is_some() && !st.state.needs_relogin {
                 st.state.needs_relogin = true;
                 self.save_state(&st);
@@ -576,7 +630,13 @@ impl Engine {
                 linked_at: Self::now(),
             });
             st.state.needs_relogin = false;
-            self.save_state(&st);
+            if let Err(e) = st.save() {
+                // 連携の記録を残せないと、次回起動時に状態が食い違うため失敗として扱う。
+                tracing::error!(error = %e, "連携の記録を保存できませんでした");
+                return Err(AuthError::Exchange(ApiError::Io(std::io::Error::other(
+                    e.to_string(),
+                ))));
+            }
         }
         *lock(&self.inner.limits) = Some(resp.limits);
         tracing::info!("Clipshare と連携しました");
@@ -590,7 +650,21 @@ impl Engine {
     /// 連携を解除する。サーバー側の失効に成功したら `true`（オフラインなどで失敗しても、ローカルの
     /// トークンは必ず削除する）。
     pub async fn logout(&self) -> Result<bool, EngineError> {
-        let token = self.inner.token_store.load().ok().flatten();
+        let token = match self.inner.token_store.load() {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!(error = %e, "トークンを読み込めないため、サーバー側の解除はできません");
+                self.inner.token_store.delete()?;
+                let mut st = lock(&self.inner.state);
+                st.state.account = None;
+                st.state.needs_relogin = false;
+                self.save_state(&st);
+                drop(st);
+                self.emit(EngineEvent::LoggedOut);
+                self.publish();
+                return Ok(false);
+            }
+        };
         let server_revoked = match &token {
             Some(t) => match self.api().revoke_token(t).await {
                 Ok(()) | Err(ApiError::Unauthorized) => true,
@@ -698,13 +772,24 @@ impl Engine {
 
     fn restart_watcher(&self) {
         let s = self.inner.settings.get();
+        let started_at = {
+            let mut g = lock(&self.inner.watch_started);
+            match g.as_ref() {
+                Some((folders, t)) if *folders == s.watch_folders => *t,
+                _ => {
+                    let now = SystemTime::now();
+                    *g = Some((s.watch_folders.clone(), now));
+                    now
+                }
+            }
+        };
         let (tx, mut rx) = mpsc::unbounded_channel::<ReadyFile>();
         let watcher = FolderWatcher::start(
             WatchOptions {
                 folders: s.watch_folders.clone(),
                 include_videos: s.watch_videos,
                 stability: s.advanced.stability.clone(),
-                started_at: SystemTime::now(),
+                started_at,
             },
             tx,
         );
@@ -729,6 +814,10 @@ impl Engine {
         };
         {
             let mut p = lock(&self.inner.processed);
+            if p.contains_path(&fp.path) {
+                tracing::debug!(file = %name, "処理済みのファイル（内容の更新）のため無視します");
+                return;
+            }
             if !p.insert(fp) {
                 tracing::debug!(file = %name, "送信済みのため無視します");
                 return;
@@ -801,7 +890,7 @@ impl Engine {
             self.save_history(&h);
         }
         // 1日上限とキャンセルは想定内の停止なので、トレイの「エラーあり」にはしない。
-        if code != "DAILY_LIMIT_EXCEEDED" && code != "CANCELLED" {
+        if code != "DAILY_LIMIT_EXCEEDED" && code != "CANCELLED" && code != "AUTO_UPLOAD_OFF" {
             self.inner.unseen_error.store(true, Ordering::SeqCst);
         }
         // イベントを受けた側が最新の状態を読めるよう、先にスナップショットを更新する。
@@ -835,6 +924,19 @@ impl Engine {
             return;
         }
         let now = Self::now();
+        if !job.manual
+            && entry.source == EntrySource::Auto
+            && !self.inner.settings.get().auto_upload_active()
+        {
+            self.fail(
+                &id,
+                "AUTO_UPLOAD_OFF",
+                "自動アップロードが無効のため送りませんでした",
+                true,
+            );
+            self.after_entry(&entry);
+            return;
+        }
         if !job.manual && entry.source == EntrySource::Auto && lock(&self.inner.state).paused(now) {
             self.fail(&id, "DAILY_LIMIT_EXCEEDED", "今日の上限に達しました", true);
             self.after_entry(&entry);
@@ -942,12 +1044,30 @@ impl Engine {
                 original_bytes: entry.size_bytes,
             });
         }
-        let (copied, copied_count) =
-            if entry.source == EntrySource::Auto && settings.copy_url_after_upload {
+        let in_open_batch = entry.batch_id.as_ref().is_some_and(|b| {
+            lock(&self.inner.batches)
+                .get(b)
+                .is_some_and(|b| !b.finished)
+        });
+        let (copied, copied_count) = if entry.source == EntrySource::Auto {
+            if settings.copy_url_after_upload {
                 self.copy_auto(&r.url, settings.advanced.toast_aggregate_ms)
             } else {
                 (false, 0)
-            };
+            }
+        } else if in_open_batch {
+            // まとめてコピーするのは右クリック共有の完了時。
+            (false, 0)
+        } else {
+            // 履歴からの再試行など、まとまりの外で終わった手動の共有はその URL をコピーする。
+            match self.inner.clipboard.set_text(&r.url) {
+                Ok(()) => (true, 1),
+                Err(e) => {
+                    tracing::warn!(error = %e, "クリップボードにコピーできませんでした");
+                    (false, 0)
+                }
+            }
+        };
         self.publish();
         self.emit(EngineEvent::Uploaded {
             entry_id: entry.id.clone(),
@@ -995,15 +1115,19 @@ impl Engine {
             }
             UploadError::Api(ApiError::DailyLimitExceeded { resets_at }) => {
                 let anonymous = lock(&self.inner.state).state.account.is_none();
-                {
+                let newly_paused = {
                     let mut st = lock(&self.inner.state);
+                    let was = st.paused(Self::now());
                     st.state.daily_pause = Some(DailyPause::start(*resets_at, Self::now()));
                     self.save_state(&st);
-                }
+                    !was
+                };
                 self.fail(id, err.code(), "今日の上限に達しました", true);
                 tracing::warn!("1日の上限に達したため自動アップロードを停止します");
-                let limit = lock(&self.inner.limits).as_ref().and_then(Limits::daily);
-                self.emit(EngineEvent::DailyLimitReached { anonymous, limit });
+                if newly_paused {
+                    let limit = lock(&self.inner.limits).as_ref().and_then(Limits::daily);
+                    self.emit(EngineEvent::DailyLimitReached { anonymous, limit });
+                }
             }
             e if e.is_offline() => {
                 {
@@ -1405,8 +1529,12 @@ impl Engine {
         if !done {
             return;
         }
-        if let Some(b) = lock(&self.inner.batches).get_mut(batch_id) {
-            b.finished = true;
+        {
+            let mut batches = lock(&self.inner.batches);
+            match batches.get_mut(batch_id) {
+                Some(b) if !b.finished => b.finished = true,
+                _ => return,
+            }
         }
         let succeeded = view.urls.len();
         let failed = view.items.len() - succeeded;

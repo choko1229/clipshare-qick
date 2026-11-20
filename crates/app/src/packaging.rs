@@ -198,10 +198,10 @@ fn alias_exe() -> Option<std::path::PathBuf> {
 
 /// インストールしたアプリを起動する（初回設定へ進む）。
 pub fn launch_installed_app() {
-    if let Some(exe) = alias_exe() {
-        if let Err(e) = std::process::Command::new(exe).spawn() {
-            tracing::warn!(error = %e, "アプリを起動できませんでした");
-        }
+    if let Some(exe) = alias_exe()
+        && let Err(e) = std::process::Command::new(exe).spawn()
+    {
+        tracing::warn!(error = %e, "アプリを起動できませんでした");
     }
 }
 

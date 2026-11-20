@@ -218,12 +218,18 @@ impl IExplorerCommand_Impl for ShareCommand_Impl {
                 Kind::Shrink => ShareQuality::Shrink,
             };
             // エクスプローラーのスレッドを止めないよう、通信と起動は別スレッドで行う。
+            // スレッドが動いている間は DllCanUnloadNow が S_FALSE を返すよう数えておく。
+            OBJECTS.fetch_add(1, Ordering::SeqCst);
             let spawned = std::thread::Builder::new()
                 .name("cq-shell-deliver".into())
                 .spawn(move || {
                     let _ = catch_unwind(AssertUnwindSafe(|| deliver(paths, quality)));
+                    OBJECTS.fetch_sub(1, Ordering::SeqCst);
                 });
-            spawned.map(|_| ()).map_err(|_| E_FAIL.into())
+            spawned.map(|_| ()).map_err(|_| {
+                OBJECTS.fetch_sub(1, Ordering::SeqCst);
+                E_FAIL.into()
+            })
         })
     }
 
@@ -325,7 +331,12 @@ impl IClassFactory_Impl for Factory_Impl {
         })
     }
 
-    fn LockServer(&self, _lock: BOOL) -> Result<()> {
+    fn LockServer(&self, lock: BOOL) -> Result<()> {
+        if lock.as_bool() {
+            OBJECTS.fetch_add(1, Ordering::SeqCst);
+        } else {
+            let _ = OBJECTS.try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
+        }
         Ok(())
     }
 }

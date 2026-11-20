@@ -54,4 +54,5 @@ jobs:
         with:
           tool: cargo-audit
       - name: cargo audit
-        run: cargo audit --deny warnings
+        # 脆弱性（vulnerability）があれば失敗する。unmaintained などの警告は REPORT.md に記録して確認する。
+        run: cargo audit

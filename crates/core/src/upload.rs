@@ -154,18 +154,18 @@ pub async fn upload_file(
         .len();
 
     let mut shrunk: Option<UploadBody<'static>> = None;
-    if let Some(limit) = job.limits.and_then(|l| l.max_bytes(job.kind)) {
-        if size > limit {
-            match job.kind {
-                MediaKind::Video => {
-                    return Err(UploadError::VideoTooLarge {
-                        limit_bytes: Some(limit),
-                    });
-                }
-                MediaKind::Image => {
-                    tracing::info!(file = %file_name, size, limit, "上限を超えるため送信前に縮小します");
-                    shrunk = Some(shrink(path).await?);
-                }
+    if let Some(limit) = job.limits.and_then(|l| l.max_bytes(job.kind))
+        && size > limit
+    {
+        match job.kind {
+            MediaKind::Video => {
+                return Err(UploadError::VideoTooLarge {
+                    limit_bytes: Some(limit),
+                });
+            }
+            MediaKind::Image => {
+                tracing::info!(file = %file_name, size, limit, "上限を超えるため送信前に縮小します");
+                shrunk = Some(shrink(path).await?);
             }
         }
     }

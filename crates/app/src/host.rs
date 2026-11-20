@@ -205,10 +205,10 @@ struct WindowApp {
 
 impl WindowApp {
     fn finish(&mut self, ctx: &egui::Context, r: WindowResult) {
-        if let Ok(mut g) = self.result.lock() {
-            if g.is_none() {
-                *g = Some(r);
-            }
+        if let Ok(mut g) = self.result.lock()
+            && g.is_none()
+        {
+            *g = Some(r);
         }
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }

@@ -295,17 +295,22 @@ pub fn spec_for(ev: &EngineEvent) -> Option<ToastSpec> {
         EngineEvent::Uploaded {
             entry_id,
             url,
-            source: EntrySource::Auto,
+            source,
             processing,
             copied,
             copied_count,
             kind,
             ..
-        } => {
+        } if *source == EntrySource::Auto || *copied => {
             if *kind == MediaKind::Video && *processing {
+                let body = if *copied {
+                    "URLはコピー済みです。変換が終わると再生できます。"
+                } else {
+                    "変換が終わると再生できます。"
+                };
                 spec(
                     "動画を処理しています".into(),
-                    "URLはコピー済みです。変換が終わると再生できます。".into(),
+                    body.into(),
                     vec![],
                     Some("upload"),
                 )

@@ -154,7 +154,9 @@ pub fn spawn_settings_effects(shared: &Arc<Shared>) {
         loop {
             let cur = rx.borrow_and_update().clone();
             let changed = |f: fn(&Settings) -> bool| prev.as_ref().is_none_or(|p| f(p) != f(&cur));
-            if cur.onboarding_completed && changed(|x| x.launch_at_startup) {
+            if cur.onboarding_completed
+                && (changed(|x| x.launch_at_startup) || changed(|x| x.onboarding_completed))
+            {
                 let on = cur.launch_at_startup;
                 if let Err(e) =
                     tokio::task::spawn_blocking(move || crate::platform::set_launch_at_startup(on))
@@ -170,10 +172,9 @@ pub fn spawn_settings_effects(shared: &Arc<Shared>) {
             if prev
                 .as_ref()
                 .is_none_or(|p| p.advanced.log_level != cur.advanced.log_level)
+                && let Some(log) = &s.log
             {
-                if let Some(log) = &s.log {
-                    log.set_level(cur.advanced.log_level);
-                }
+                log.set_level(cur.advanced.log_level);
             }
             if prev.is_some() && changed(|x| x.steamvr_enabled) {
                 crate::vr_bridge::set_registered(cur.steamvr_enabled);

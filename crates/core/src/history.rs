@@ -363,6 +363,11 @@ impl ProcessedSet {
         }
     }
 
+    /// 同じパスのファイルを処理したことがあるか（内容が後から変わっても二重に送らないため）。
+    pub fn contains_path(&self, path_key: &str) -> bool {
+        self.items.iter().any(|f| f.path == path_key)
+    }
+
     pub fn contains(&self, fp: &Fingerprint) -> bool {
         self.items.contains(fp)
     }

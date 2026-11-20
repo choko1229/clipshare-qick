@@ -23,13 +23,13 @@ fn send(c: VrCommand) {
 
 /// SteamVR から起動するときの実行ファイル。パッケージ版は実行エイリアス（`clipshare-quick.exe`）を使う。
 fn launch_exe() -> std::path::PathBuf {
-    if crate::platform::is_packaged() {
-        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-            return std::path::PathBuf::from(local)
-                .join("Microsoft")
-                .join("WindowsApps")
-                .join("clipshare-quick.exe");
-        }
+    if crate::platform::is_packaged()
+        && let Some(local) = std::env::var_os("LOCALAPPDATA")
+    {
+        return std::path::PathBuf::from(local)
+            .join("Microsoft")
+            .join("WindowsApps")
+            .join("clipshare-quick.exe");
     }
     std::env::current_exe().unwrap_or_default()
 }
