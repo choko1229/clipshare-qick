@@ -42,7 +42,7 @@
 ## Step 6: 仕上げ
 - [x] `MANUAL_TESTS.md`（実機確認手順） — 2026-11-21
 - [x] セルフレビュー1回目（INSTRUCTIONS §10）→ 修正 — 2026-11-21（REPORT.md に記録）
-- [ ] セルフレビュー2回目 → 修正
-- [ ] fmt / clippy / test / audit 全通過
-- [ ] `README.md`（利用者向け）、`REPORT.md`（完了報告）
-- [ ] 作業ブランチをpush、PR作成（マージはしない）
+- [x] セルフレビュー2回目 → 修正 — 2026-11-21（独立レビュー 15 件中 13 件修正、残りは Q-021/Q-023）
+- [x] fmt / clippy / test / audit 全通過 — 2026-11-21（テスト 112 件、audit は脆弱性 0・警告 4 件を REPORT に記録）
+- [x] `README.md`（利用者向け）、`REPORT.md`（完了報告） — 2026-11-21
+- [x] 作業ブランチをpush、PR作成（マージはしない） — 2026-11-21（`feature/installer`）
