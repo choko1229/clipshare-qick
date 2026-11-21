@@ -104,11 +104,15 @@ fn main() {
         return;
     };
     let paths = AppPaths::new(root);
+    let acl = cq_core::fsutil::restrict_dir_to_current_user(paths.root());
     let settings = SettingsStore::load(&paths.settings_file());
     let log = cq_core::logging::init(&paths.log_dir(), settings.get().advanced.log_level)
         .ok()
         .map(Arc::new);
     install_panic_hook();
+    if let Err(e) = acl {
+        tracing::warn!(error = %e, "データフォルダのアクセス権を設定できませんでした");
+    }
 
     // すでに動いていれば、要求を渡して終わる（二重起動しない）。
     if let Some(req) = to_request(&launch) {

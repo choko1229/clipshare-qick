@@ -1318,6 +1318,18 @@ impl Engine {
             if self.expire_pause() {
                 self.publish();
             }
+            // 期限切れになった匿名の削除用トークンを履歴ファイルから消す。
+            let purged = {
+                let mut h = lock(&self.inner.history);
+                let changed = h.purge_expired_secrets(Self::now());
+                if changed {
+                    self.save_history(&h);
+                }
+                changed
+            };
+            if purged {
+                self.publish();
+            }
         }
     }
 
@@ -1687,6 +1699,15 @@ impl Engine {
                 let _ = std::fs::remove_file(f);
             }
             let _ = std::fs::remove_dir_all(self.inner.paths.download_dir());
+            // 退避した壊れたファイル・書き込み途中の一時ファイルも残さない。
+            if let Ok(rd) = std::fs::read_dir(&root) {
+                for e in rd.flatten() {
+                    let n = e.file_name().to_string_lossy().into_owned();
+                    if n.ends_with(".broken.json") || (n.starts_with('.') && n.ends_with(".tmp")) {
+                        let _ = std::fs::remove_file(e.path());
+                    }
+                }
+            }
             report.local_data_deleted = true;
             tracing::info!(root = %crate::logging::mask_path(&root), "ローカルの設定と履歴を削除しました");
         }

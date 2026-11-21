@@ -211,12 +211,14 @@ pub struct HistoryStore {
 impl HistoryStore {
     /// 読み込む。前回終了時に送信中だったものは「送信待ち」に戻す（再起動後に送り直す）。
     pub fn load(path: &Path, limit: usize) -> Self {
+        // 履歴には匿名の削除用トークンが入るため、書き込み途中の一時ファイルや壊れたファイルを残さない。
+        fsutil::remove_stale_tmp(path);
         let mut entries = match fsutil::load_json::<HistoryFile>(path) {
             Ok(Some(f)) => f.entries,
             Ok(None) => Vec::new(),
             Err(e) => {
                 tracing::warn!(error = %e, "履歴を読み込めないため空で始めます");
-                fsutil::quarantine(path);
+                fsutil::discard(path);
                 Vec::new()
             }
         };
@@ -231,7 +233,28 @@ impl HistoryStore {
             entries,
         };
         s.trim();
+        if s.purge_expired_secrets(chrono::Utc::now())
+            && let Err(e) = s.save()
+        {
+            tracing::warn!(error = %e, "履歴を保存できませんでした");
+        }
         s
+    }
+
+    /// 使えなくなった削除用トークン（期限切れ・削除済み・失敗）を消す。消したら `true`。
+    pub fn purge_expired_secrets(&mut self, now: DateTime<Utc>) -> bool {
+        let mut changed = false;
+        for e in &mut self.entries {
+            let unusable = matches!(
+                e.display_status(now),
+                DisplayStatus::Expired | DisplayStatus::Deleted | DisplayStatus::Failed
+            );
+            if unusable && e.delete_token.is_some() {
+                e.delete_token = None;
+                changed = true;
+            }
+        }
+        changed
     }
 
     pub fn set_limit(&mut self, limit: usize) {
@@ -472,6 +495,48 @@ mod tests {
         assert!(h2.update(&id, |e| e.status = EntryStatus::Done));
         assert!(h2.remove(&id).is_some());
         assert!(h2.get(&id).is_none());
+    }
+
+    #[test]
+    fn delete_tokens_are_purged_when_unusable_and_never_printed() {
+        let now = Utc::now();
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("h.json");
+        let mut h = HistoryStore::load(&p, 50);
+        let mut live = entry("live.png", EntryStatus::Done);
+        live.expires_at = Some(now + TimeDelta::hours(1));
+        live.delete_token = Some(SecretString::new("live-secret"));
+        let mut old = entry("old.png", EntryStatus::Done);
+        old.expires_at = Some(now - TimeDelta::minutes(1));
+        old.delete_token = Some(SecretString::new("old-secret"));
+        let (live_id, old_id) = (live.id.clone(), old.id.clone());
+        h.add(live);
+        h.add(old);
+        assert!(
+            !format!("{:?}", h.entries()).contains("secret"),
+            "Debug に出さない"
+        );
+        h.save().unwrap();
+        // 再読み込み時に期限切れのトークンは消えて保存される
+        let h2 = HistoryStore::load(&p, 50);
+        assert!(h2.get(&old_id).unwrap().delete_token.is_none());
+        assert!(h2.get(&live_id).unwrap().delete_token.is_some());
+        let raw = std::fs::read_to_string(&p).unwrap();
+        assert!(!raw.contains("old-secret"));
+        assert!(raw.contains("live-secret"));
+    }
+
+    #[test]
+    fn broken_history_is_discarded_not_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("history.json");
+        std::fs::write(&p, b"{broken \"deleteToken\":\"secret\"").unwrap();
+        std::fs::write(dir.path().join(".history.json.9.tmp"), b"secret").unwrap();
+        let h = HistoryStore::load(&p, 50);
+        assert!(h.entries().is_empty());
+        assert!(!p.exists());
+        assert!(!dir.path().join("history.broken.json").exists());
+        assert!(!dir.path().join(".history.json.9.tmp").exists());
     }
 
     #[test]
