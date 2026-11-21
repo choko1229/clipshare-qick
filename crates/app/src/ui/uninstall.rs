@@ -209,13 +209,10 @@ fn done(
 ) -> Action {
     let mut action = Action::None;
     ui.label(widgets::title("アンインストールが完了しました", p));
-    if !report.server_revoked {
+    if let Some((title, body)) = unlink_notice(&report) {
         widgets::tinted(ui, p.was, p.was, |ui| {
-            ui.label(widgets::strong("連携の解除が完了していません", p));
-            ui.label(widgets::muted(
-                "オフラインだったため、サーバー側のトークンは残っています。Clipshareの「連携アプリ」からこのPCを解除してください。",
-                p,
-            ));
+            ui.label(widgets::strong(title, p));
+            ui.label(widgets::muted(body, p));
         });
     }
     if report.uploads_not_deleted > 0 {
@@ -244,4 +241,36 @@ fn done(
         }
     });
     action
+}
+
+/// 完了画面（画面 22）の「連携の解除が完了していません」の帯。サーバー側で解除できたときは出さない。
+fn unlink_notice(report: &UninstallReport) -> Option<(&'static str, &'static str)> {
+    (!report.server_revoked).then_some((
+        crate::actions::UNLINK_INCOMPLETE_TITLE,
+        crate::actions::UNLINK_INCOMPLETE_BODY,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 画面 22 の帯は通知（画面 16）と同じ文言（Q-033）。
+    #[test]
+    fn unlink_notice_uses_confirmed_text() {
+        let mut r = UninstallReport {
+            server_revoked: false,
+            ..UninstallReport::default()
+        };
+        let (title, body) = unlink_notice(&r).unwrap();
+        assert_eq!(title, "連携の解除が完了していません");
+        assert_eq!(
+            body,
+            "連携の解除を完了できませんでした。連携アプリで状態を確認してください。"
+        );
+        let t = crate::toast::unlink_incomplete_spec();
+        assert_eq!((t.title.as_str(), t.body.as_str()), (title, body));
+        r.server_revoked = true;
+        assert!(unlink_notice(&r).is_none());
+    }
 }

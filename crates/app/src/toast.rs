@@ -296,8 +296,8 @@ pub fn new_version_spec() -> ToastSpec {
 /// ログアウト時にサーバー側の失効ができなかった通知（デザイン 16「連携の解除が未完了」。本文は QUESTIONS Q-033 で確定、2026-11-22）。
 pub fn unlink_incomplete_spec() -> ToastSpec {
     ToastSpec {
-        title: "連携の解除が完了していません".into(),
-        body: "連携の解除を完了できませんでした。連携アプリで状態を確認してください。".into(),
+        title: crate::actions::UNLINK_INCOMPLETE_TITLE.into(),
+        body: crate::actions::UNLINK_INCOMPLETE_BODY.into(),
         buttons: vec![ToastButton {
             label: "連携アプリを開く",
             action: ToastAction::ManagePage,

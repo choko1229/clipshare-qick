@@ -46,6 +46,12 @@ pub fn delete_entry(shared: &Arc<Shared>, id: String) {
     });
 }
 
+/// サーバー側の連携の解除（トークンの失効）ができなかったときの見出しと本文。
+/// 通知（画面 16）とアンインストールの完了（画面 22）で共通（QUESTIONS Q-033、2026-11-22 確定）。
+pub const UNLINK_INCOMPLETE_TITLE: &str = "連携の解除が完了していません";
+pub const UNLINK_INCOMPLETE_BODY: &str =
+    "連携の解除を完了できませんでした。連携アプリで状態を確認してください。";
+
 /// ソースコード（設定「情報」の「GitHubを開く」）。
 pub const SOURCE_URL: &str = "https://github.com/choko1229/clipshare-qick";
 
