@@ -117,3 +117,15 @@
 | 21 | ⑮「最新です」の見出し・版・自動確認のトグル。⑯ 手動の更新に容量と自動確認のトグル（`ManualOnly` に容量を追加） | `ui/update.rs`、`core/update.rs`、`app.rs`、`updater.rs` | `missing_sha256_is_manual_only_and_never_verified`（容量） |
 | 23 | 区切り線の一覧に。トグルの反映を関数にした | `ui/settings.rs`、`toast.rs`（`windows_toast_enabled`）、`vr_bridge.rs`（`vr_hud_enabled`） | `windows_toast_toggle_is_respected`、`vr_hud_toggle_is_respected` |
 | 24 | 4 行の一覧（バッジ「v[VERSION]」「MIT」、「GitHubを開く」「開く」） | `ui/settings.rs`（`about`）、`actions.rs`（`SOURCE_URL`） | — |
+
+## オーナー回答の反映（2026-11-22）
+
+| 質問 | 回答 | 反映 |
+|---|---|---|
+| Q-029 | 実装のまま | `design/11` の「利用不可（403）」に、ログイン済みと同じアカウント欄・「連携アプリをWebで管理」・「ログアウト」・注記を追加（ウィンドウの高さを 720px に） |
+| Q-030 | 実装のまま | `design/09` の「利用不可（403）」に、「直近のアップロード」の一覧と下部のアカウント欄を追加（高さを 720px に） |
+| Q-031 | 実装のまま | 実装のヘッダーのバッジ「利用不可」を、デザイン 09 のとおり灰色（`Tone::Muted`）に修正（`history::header_tone`、テスト `blocked_badge_is_muted_like_design`） |
+| Q-032 | 実装のまま | `design/14` の「既定」バッジと「長辺2000px・WebP」を外し、項目名を「縮小して共有（既定）」に（2 状態とも） |
+| Q-033 | 文言を変更 | 本文を「連携の解除を完了できませんでした。連携アプリで状態を確認してください。」に（`toast::unlink_incomplete_spec`、テスト `added_toasts_follow_design`、`design/16`） |
+
+`design/` のスナップショットは手で編集した。キャンバス（正）への反映は `design/README.md` の依頼リスト 13〜16。
