@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Clipshare Quick の MSIX マニフェスト（テンプレート）。
+  {{VERSION}} と {{PUBLISHER}} は installer/build-msix.ps1 が置き換える。
+  CLSID は crates/shell-ext/src/com.rs の CLSID_SHARE_COMMAND と一致させること。
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
+  xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5"
+  xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
+  xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap5 desktop desktop4 desktop5 desktop6 com rescap">
+
+  <Identity Name="choko1229.ClipshareQuick" Publisher="{{PUBLISHER}}" Version="{{VERSION}}" ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>Clipshare Quick</DisplayName>
+    <PublisherDisplayName>Clipshare</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <!-- 右クリック拡張（エクスプローラー内で動く）と同じ場所の設定・ログを読むため、書き込みの仮想化を無効にする。 -->
+    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
+    <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="ja-JP" />
+  </Resources>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="unvirtualizedResources" />
+  </Capabilities>
+
+  <Applications>
+    <Application Id="App" Executable="clipshare-quick.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="Clipshare Quick"
+        Description="Clipshare Quick"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <!-- 右クリック拡張・SteamVR・ショートカットから起動するための実行エイリアス -->
+        <uap5:Extension Category="windows.appExecutionAlias" Executable="clipshare-quick.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap5:AppExecutionAlias>
+            <uap5:ExecutionAlias Alias="clipshare-quick.exe" />
+          </uap5:AppExecutionAlias>
+        </uap5:Extension>
+
+        <!-- Windows 起動時の開始（アプリの設定から有効・無効を切り替える） -->
+        <desktop:Extension Category="windows.startupTask">
+          <desktop:StartupTask TaskId="ClipshareQuickStartup" Enabled="false" DisplayName="Clipshare Quick" />
+        </desktop:Extension>
+
+        <!-- Windows 11 の最上位コンテキストメニュー（画像・動画） -->
+        <desktop4:Extension Category="windows.fileExplorerContextMenus">
+          <desktop4:FileExplorerContextMenus>
+            <desktop5:ItemType Type=".png"><desktop5:Verb Id="ClipshareShare" Clsid="6F3C2A8E-5B1D-4F7A-9C2E-8D4B1A7E3C51" /></desktop5:ItemType>
+            <desktop5:ItemType Type=".jpg"><desktop5:Verb Id="ClipshareShare" Clsid="6F3C2A8E-5B1D-4F7A-9C2E-8D4B1A7E3C51" /></desktop5:ItemType>
+            <desktop5:ItemType Type=".jpeg"><desktop5:Verb Id="ClipshareShare" Clsid="6F3C2A8E-5B1D-4F7A-9C2E-8D4B1A7E3C51" /></desktop5:ItemType>
+            <desktop5:ItemType Type=".webp"><desktop5:Verb Id="ClipshareShare" Clsid="6F3C2A8E-5B1D-4F7A-9C2E-8D4B1A7E3C51" /></desktop5:ItemType>
+            <desktop5:ItemType Type=".mp4"><desktop5:Verb Id="ClipshareShare" Clsid="6F3C2A8E-5B1D-4F7A-9C2E-8D4B1A7E3C51" /></desktop5:ItemType>
+            <desktop5:ItemType Type=".mov"><desktop5:Verb Id="ClipshareShare" Clsid="6F3C2A8E-5B1D-4F7A-9C2E-8D4B1A7E3C51" /></desktop5:ItemType>
+            <desktop5:ItemType Type=".webm"><desktop5:Verb Id="ClipshareShare" Clsid="6F3C2A8E-5B1D-4F7A-9C2E-8D4B1A7E3C51" /></desktop5:ItemType>
+            <desktop5:ItemType Type=".m4v"><desktop5:Verb Id="ClipshareShare" Clsid="6F3C2A8E-5B1D-4F7A-9C2E-8D4B1A7E3C51" /></desktop5:ItemType>
+            <desktop5:ItemType Type=".mkv"><desktop5:Verb Id="ClipshareShare" Clsid="6F3C2A8E-5B1D-4F7A-9C2E-8D4B1A7E3C51" /></desktop5:ItemType>
+            <desktop5:ItemType Type=".avi"><desktop5:Verb Id="ClipshareShare" Clsid="6F3C2A8E-5B1D-4F7A-9C2E-8D4B1A7E3C51" /></desktop5:ItemType>
+          </desktop4:FileExplorerContextMenus>
+        </desktop4:Extension>
+
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:SurrogateServer DisplayName="Clipshare Quick 右クリックメニュー">
+              <com:Class Id="6F3C2A8E-5B1D-4F7A-9C2E-8D4B1A7E3C51" Path="cq_shell_ext.dll" ThreadingModel="STA" />
+            </com:SurrogateServer>
+          </com:ComServer>
+        </com:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>
