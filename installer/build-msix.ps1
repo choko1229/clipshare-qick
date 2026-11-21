@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Clipshare Quick の MSIX を作る（必要なら署名もする）。
 
