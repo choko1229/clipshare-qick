@@ -257,7 +257,7 @@ impl Wizard {
                 action = self.success(ui, p, &name);
             }
             LoginState::Failed { code } => {
-                let forbidden = code == "FORBIDDEN";
+                let next = failure_action(&code);
                 ui.label(widgets::title("連携できませんでした", p));
                 ui.label(widgets::body(login_failure_text(&code), p));
                 ui.add_space(8.0);
@@ -272,14 +272,19 @@ impl Wizard {
                     p,
                 ));
                 bottom_bar(ui, p, |ui| {
-                    if forbidden {
+                    match next {
                         // 403 は再認可で解決しないため、再試行ではなくお問い合わせへ案内する（Q-024）。
-                        if widgets::primary(ui, p, "お問い合わせ").clicked() {
-                            crate::platform::open_url(&crate::actions::contact_url(shared));
+                        FailureAction::Contact => {
+                            if widgets::primary(ui, p, next.label()).clicked() {
+                                crate::platform::open_url(&crate::actions::contact_url(shared));
+                            }
                         }
-                    } else if widgets::primary(ui, p, "もう一度試す").clicked() {
-                        shared.reset_login();
-                        shared.start_login();
+                        FailureAction::Retry => {
+                            if widgets::primary(ui, p, next.label()).clicked() {
+                                shared.reset_login();
+                                shared.start_login();
+                            }
+                        }
                     }
                     if widgets::secondary(ui, p, "あとで連携する").clicked() {
                         shared.reset_login();
@@ -327,6 +332,33 @@ impl Wizard {
     }
 }
 
+/// 連携に失敗したときの主ボタン（画面 06 の「失敗」各状態）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureAction {
+    /// 403: 「お問い合わせ」（再試行は出さない）。
+    Contact,
+    /// それ以外（キャンセル・時間切れ・503 など）: 「もう一度試す」。
+    Retry,
+}
+
+impl FailureAction {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Contact => "お問い合わせ",
+            Self::Retry => "もう一度試す",
+        }
+    }
+}
+
+/// エラーコードから主ボタンを決める。
+pub fn failure_action(code: &str) -> FailureAction {
+    if code == "FORBIDDEN" {
+        FailureAction::Contact
+    } else {
+        FailureAction::Retry
+    }
+}
+
 /// 連携の失敗の説明。403（BAN）と 503（発行停止中）は再試行やキャンセルとは別の案内にする（契約 v1.1）。
 pub fn login_failure_text(code: &str) -> &'static str {
     match code {
@@ -365,4 +397,41 @@ pub fn connection_code_card(ui: &mut Ui, p: &Palette, code: &str, deadline: Inst
 /// 下部のボタン列（右寄せ）。
 fn bottom_bar(ui: &mut Ui, p: &Palette, add: impl FnOnce(&mut Ui)) {
     widgets::bottom_bar(ui, p, add);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 画面 06「失敗（403）」: お問い合わせのみ（もう一度試すは出さない）。
+    #[test]
+    fn forbidden_failure_points_to_contact() {
+        assert_eq!(failure_action("FORBIDDEN"), FailureAction::Contact);
+        assert_eq!(FailureAction::Contact.label(), "お問い合わせ");
+        assert_eq!(
+            login_failure_text("FORBIDDEN"),
+            "このアカウントではClipshare Quickを利用できません。"
+        );
+    }
+
+    /// 画面 06「失敗（503）」: 発行停止の説明と「もう一度試す」。
+    #[test]
+    fn unavailable_failure_can_retry() {
+        assert_eq!(failure_action("SERVICE_UNAVAILABLE"), FailureAction::Retry);
+        assert_eq!(FailureAction::Retry.label(), "もう一度試す");
+        assert_eq!(
+            login_failure_text("SERVICE_UNAVAILABLE"),
+            "現在、新しい連携を受け付けていません。時間をおいてお試しください。"
+        );
+    }
+
+    /// 画面 06「失敗・キャンセル」: 従来どおり。
+    #[test]
+    fn timeout_failure_can_retry() {
+        assert_eq!(failure_action("AUTH_TIMEOUT"), FailureAction::Retry);
+        assert_eq!(
+            login_failure_text("AUTH_TIMEOUT"),
+            "許可がキャンセルされたか、時間切れになりました。もう一度お試しください。"
+        );
+    }
 }

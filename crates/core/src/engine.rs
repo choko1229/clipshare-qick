@@ -45,6 +45,8 @@ pub enum TrayState {
     Paused,
     NeedsLogin,
     Offline,
+    /// 403（BAN など）で利用できない（デザイン 09「利用不可」、QUESTIONS Q-031）。
+    Blocked,
 }
 
 impl TrayState {
@@ -56,8 +58,41 @@ impl TrayState {
             Self::Paused => "一時停止",
             Self::NeedsLogin => "要ログイン",
             Self::Offline => "オフライン",
+            Self::Blocked => "利用不可",
         }
     }
+
+    /// 状態の優先順位を 1 か所で決める（UI に依存しない）。
+    pub fn resolve(f: &TrayFacts) -> Self {
+        if f.needs_relogin {
+            Self::NeedsLogin
+        } else if f.blocked {
+            // 403 の間はアップロードできないため、アップロード中・オフラインより優先する。
+            Self::Blocked
+        } else if f.uploading {
+            Self::Uploading
+        } else if f.offline {
+            Self::Offline
+        } else if f.unseen_error {
+            Self::Error
+        } else if !f.auto_upload_active || f.daily_paused {
+            Self::Paused
+        } else {
+            Self::Idle
+        }
+    }
+}
+
+/// トレイの状態を決める材料。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TrayFacts {
+    pub needs_relogin: bool,
+    pub blocked: bool,
+    pub uploading: bool,
+    pub offline: bool,
+    pub unseen_error: bool,
+    pub auto_upload_active: bool,
+    pub daily_paused: bool,
 }
 
 /// アカウントの表示状態。
@@ -77,7 +112,10 @@ pub enum AccountView {
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub tray: TrayState,
+    /// 自動アップロードが実際に動く状態か（設定が ON でも、403 の間は `false`。Q-031）。
     pub auto_upload: bool,
+    /// 設定の自動アップロード（403 の間も利用者が選んだ値のまま）。
+    pub auto_upload_setting: bool,
     pub account: AccountView,
     pub limits: Option<Limits>,
     pub offline: bool,
@@ -303,6 +341,7 @@ impl Engine {
         let (snapshot, _) = watch::channel(Snapshot {
             tray: TrayState::Idle,
             auto_upload: s.auto_upload_active(),
+            auto_upload_setting: s.auto_upload_active(),
             account: AccountView::Anonymous,
             limits: None,
             offline: false,
@@ -438,22 +477,19 @@ impl Engine {
         let offline = !self.inner.online.load(Ordering::SeqCst);
         let uploading = history.iter().any(|e| e.status == EntryStatus::Uploading);
         let unseen_error = self.inner.unseen_error.load(Ordering::SeqCst);
-        let tray = if matches!(account, AccountView::NeedsRelogin { .. }) {
-            TrayState::NeedsLogin
-        } else if uploading {
-            TrayState::Uploading
-        } else if offline {
-            TrayState::Offline
-        } else if unseen_error || blocked {
-            TrayState::Error
-        } else if !settings.auto_upload_active() || paused {
-            TrayState::Paused
-        } else {
-            TrayState::Idle
-        };
+        let tray = TrayState::resolve(&TrayFacts {
+            needs_relogin: matches!(account, AccountView::NeedsRelogin { .. }),
+            blocked,
+            uploading,
+            offline,
+            unseen_error,
+            auto_upload_active: settings.auto_upload_active(),
+            daily_paused: paused,
+        });
         let snap = Snapshot {
             tray,
-            auto_upload: settings.auto_upload_active(),
+            auto_upload: settings.auto_upload_active() && !blocked,
+            auto_upload_setting: settings.auto_upload_active(),
             account,
             limits: lock(&self.inner.limits).clone(),
             offline,
@@ -1763,5 +1799,48 @@ impl LoginSession {
         let api = self.engine.api();
         let resp = self.pending.exchange(&api, code).await?;
         self.engine.complete_login(resp).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn facts() -> TrayFacts {
+        TrayFacts {
+            auto_upload_active: true,
+            ..TrayFacts::default()
+        }
+    }
+
+    #[test]
+    fn tray_state_priority() {
+        assert_eq!(TrayState::resolve(&facts()), TrayState::Idle);
+        // 403 は「利用不可」（デザイン 09）。アップロード中・オフライン・エラーより優先
+        let blocked = TrayFacts {
+            blocked: true,
+            uploading: true,
+            offline: true,
+            unseen_error: true,
+            ..facts()
+        };
+        assert_eq!(TrayState::resolve(&blocked), TrayState::Blocked);
+        assert_eq!(TrayState::Blocked.label(), "利用不可");
+        // 連携切れは再ログインで解決できるため最優先
+        let relogin = TrayFacts {
+            needs_relogin: true,
+            ..blocked
+        };
+        assert_eq!(TrayState::resolve(&relogin), TrayState::NeedsLogin);
+        let paused = TrayFacts {
+            auto_upload_active: false,
+            ..facts()
+        };
+        assert_eq!(TrayState::resolve(&paused), TrayState::Paused);
+        let err = TrayFacts {
+            unseen_error: true,
+            ..facts()
+        };
+        assert_eq!(TrayState::resolve(&err), TrayState::Error);
     }
 }

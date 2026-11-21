@@ -100,6 +100,7 @@ pub enum UpdateState {
     /// 新しい版はあるが SHA-256 が無いためアプリ内では適用しない（ダウンロードページへ案内）。
     ManualAvailable {
         version: String,
+        size_bytes: u64,
         notes: String,
     },
     Downloading {

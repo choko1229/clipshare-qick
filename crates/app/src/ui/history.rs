@@ -102,7 +102,7 @@ impl HistoryPanel {
             let tone = match snap.tray {
                 TrayState::Idle => Tone::Primary,
                 TrayState::Uploading => Tone::Primary,
-                TrayState::Error | TrayState::Offline => Tone::Danger,
+                TrayState::Error | TrayState::Offline | TrayState::Blocked => Tone::Danger,
                 TrayState::Paused => Tone::Muted,
                 TrayState::NeedsLogin => Tone::Warning,
             };
@@ -121,8 +121,14 @@ impl HistoryPanel {
             ui.horizontal(|ui| {
                 ui.label(widgets::strong("自動アップロード", p));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    // 403 の間は実際の状態（OFF）を表示し、操作できないようにする（デザイン 09、Q-031）。
                     let mut on = snap.auto_upload;
-                    if widgets::toggle(ui, p, &mut on, "自動アップロード").changed() {
+                    let changed = ui
+                        .add_enabled_ui(!snap.blocked, |ui| {
+                            widgets::toggle(ui, p, &mut on, "自動アップロード").changed()
+                        })
+                        .inner;
+                    if changed {
                         shared.send(Command::SetAutoUpload(on));
                     }
                 });

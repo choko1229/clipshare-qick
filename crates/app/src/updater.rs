@@ -91,40 +91,25 @@ async fn check(shared: &Arc<Shared>, user_initiated: bool) {
                 notes,
             });
             if !user_initiated {
-                crate::toast::show(
-                    shared,
-                    &crate::toast::ToastSpec {
-                        title: "新しいバージョンがあります".into(),
-                        body: format!("v{} → {v}", cq_core::APP_VERSION),
-                        buttons: vec![crate::toast::ToastButton {
-                            label: "ダウンロードして更新",
-                            action: crate::toast::ToastAction::Update,
-                        }],
-                        tag: Some("update"),
-                        launch: crate::toast::ToastAction::Update,
-                    },
-                );
+                crate::toast::show(shared, &crate::toast::new_version_spec());
             }
         }
-        Ok(UpdateDecision::ManualOnly { version, notes }) => {
+        Ok(UpdateDecision::ManualOnly {
+            version,
+            notes,
+            size_bytes,
+        }) => {
             let v = format!("v{version}");
             tracing::info!(version = %v, "新しいバージョンがあります（検証用のハッシュが無いためダウンロードページへ案内）");
             set_found(None);
             shared.set_update_state(UpdateState::ManualAvailable {
                 version: v.clone(),
+                size_bytes,
                 notes,
             });
             if !user_initiated {
-                crate::toast::show(
-                    shared,
-                    &crate::toast::ToastSpec {
-                        title: "新しいバージョンがあります".into(),
-                        body: format!("v{} → {v}", cq_core::APP_VERSION),
-                        buttons: vec![],
-                        tag: Some("update"),
-                        launch: crate::toast::ToastAction::Update,
-                    },
-                );
+                // 手動の更新でも同じ通知（「開く」で画面 21 ⑯ を開き、そこから更新履歴へ案内する）。
+                crate::toast::show(shared, &crate::toast::new_version_spec());
             }
         }
         Ok(UpdateDecision::UpToDate | UpdateDecision::NoAsset) => {

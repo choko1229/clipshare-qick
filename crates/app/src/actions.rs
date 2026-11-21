@@ -12,6 +12,28 @@ pub fn set_auto_upload(shared: &Arc<Shared>, on: bool) -> Result<(), String> {
     shared.engine.set_auto_upload(on).map_err(|e| e.to_string())
 }
 
+/// トレイ・VR パネルの「自動アップロード」を押したときの新しい値。
+///
+/// 403 の間は表示が OFF で操作できない扱いのため、設定を変えない（`None`）。表示（OFF）と
+/// 設定（ON）が違う状態で反転すると、利用者の意図と逆に設定を OFF にしてしまうため（Q-031）。
+pub fn next_auto_upload(blocked: bool, current_setting: bool) -> Option<bool> {
+    (!blocked).then_some(!current_setting)
+}
+
+/// トレイ・VR パネルから自動アップロードを切り替える。
+pub fn toggle_auto_upload(shared: &Arc<Shared>) {
+    let current = shared.engine.settings().get().auto_upload_active();
+    match next_auto_upload(shared.engine.is_blocked(), current) {
+        Some(on) => {
+            if let Err(e) = set_auto_upload(shared, on) {
+                tracing::warn!(error = %e, "自動アップロードを切り替えられませんでした");
+            }
+        }
+        None => tracing::info!("利用不可（403）のため自動アップロードの切り替えを無視しました"),
+    }
+    shared.wake();
+}
+
 /// サーバーから削除する（非同期）。
 pub fn delete_entry(shared: &Arc<Shared>, id: String) {
     let s = Arc::clone(shared);
@@ -23,6 +45,9 @@ pub fn delete_entry(shared: &Arc<Shared>, id: String) {
         s.wake();
     });
 }
+
+/// ソースコード（設定「情報」の「GitHubを開く」）。
+pub const SOURCE_URL: &str = "https://github.com/choko1229/clipshare-qick";
 
 /// Web の「連携アプリ」管理ページ。
 pub fn manage_url(shared: &Arc<Shared>) -> String {
@@ -205,6 +230,15 @@ mod tests {
             join_web(&s, &s.advanced.contact_path),
             "https://clipshare.link/contact"
         );
+    }
+
+    /// 403 の間はトレイ・VR から押しても設定を変えない（Q-031）。
+    #[test]
+    fn toggle_is_ignored_while_blocked() {
+        assert_eq!(next_auto_upload(true, true), None);
+        assert_eq!(next_auto_upload(true, false), None);
+        assert_eq!(next_auto_upload(false, true), Some(false));
+        assert_eq!(next_auto_upload(false, false), Some(true));
     }
 
     #[test]

@@ -122,12 +122,7 @@ pub fn panel_model(snap: &Snapshot) -> PanelModel {
 
 fn on_panel_action(shared: &Arc<Shared>, a: PanelAction) {
     match a {
-        PanelAction::ToggleAutoUpload => {
-            let on = !shared.engine.settings().get().auto_upload_active();
-            if let Err(e) = shared.engine.set_auto_upload(on) {
-                tracing::warn!(error = %e, "VR から自動アップロードを切り替えられませんでした");
-            }
-        }
+        PanelAction::ToggleAutoUpload => crate::actions::toggle_auto_upload(shared),
         PanelAction::ConfirmDelete(id) => crate::actions::delete_entry(shared, id),
         PanelAction::Retry(id) => {
             if let Err(e) = shared.engine.retry(&id) {
@@ -188,8 +183,13 @@ pub fn hud_for(ev: &EngineEvent) -> Option<HudMessage> {
     })
 }
 
+/// 設定「通知」の「VR内の通知」（画面 23）が ON か。ダッシュボードパネルはこの設定に関係なく使える。
+pub fn vr_hud_enabled(settings: &cq_core::settings::Settings) -> bool {
+    settings.notifications.vr_hud
+}
+
 pub fn on_event(shared: &Arc<Shared>, ev: &EngineEvent) {
-    if !shared.engine.settings().get().notifications.vr_hud {
+    if !vr_hud_enabled(&shared.engine.settings().get()) {
         return;
     }
     if let Some(h) = hud_for(ev) {
@@ -200,6 +200,18 @@ pub fn on_event(shared: &Arc<Shared>, ev: &EngineEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 設定「通知」の「VR内の通知」の反映（画面 23）。Windowsの通知とは独立。
+    #[test]
+    fn vr_hud_toggle_is_respected() {
+        let mut s = cq_core::settings::Settings::default();
+        assert!(vr_hud_enabled(&s), "既定は ON");
+        s.notifications.vr_hud = false;
+        assert!(!vr_hud_enabled(&s));
+        s.notifications.vr_hud = true;
+        s.notifications.windows_toast = false;
+        assert!(vr_hud_enabled(&s));
+    }
 
     #[test]
     fn hud_texts_follow_design() {

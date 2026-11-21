@@ -899,7 +899,11 @@ async fn v11_forbidden_blocks_uploads_without_falling_back_to_anonymous() {
     h.next_event(|e| matches!(e, EngineEvent::AccountBlocked))
         .await;
     let s = h.wait_for("利用停止", |s| s.blocked).await;
-    assert_eq!(s.tray, cq_core::engine::TrayState::Error);
+    assert_eq!(s.tray, cq_core::engine::TrayState::Blocked);
+    assert_eq!(s.tray.label(), "利用不可");
+    // 設定は ON のまま、表示は実際の状態（OFF）にする（Q-031）
+    assert!(s.auto_upload_setting);
+    assert!(!s.auto_upload);
     // 403 の失敗は再試行させない
     let failed = s
         .history
@@ -923,7 +927,10 @@ async fn v11_forbidden_blocks_uploads_without_falling_back_to_anonymous() {
     // 解除されたら上限情報の取得で戻る
     mock.configure(|c| c.banned = false);
     h.engine.refresh_limits().await;
-    assert!(!h.snap().blocked);
+    let s = h.snap();
+    assert!(!s.blocked);
+    assert!(s.auto_upload, "解除されたら元の設定（ON）に戻る");
+    assert_ne!(s.tray, cq_core::engine::TrayState::Blocked);
 }
 
 #[tokio::test(flavor = "multi_thread")]

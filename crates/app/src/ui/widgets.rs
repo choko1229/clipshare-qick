@@ -134,6 +134,17 @@ pub fn small(ui: &mut Ui, p: &Palette, text: &str) -> Response {
     )
 }
 
+/// 赤枠の小さいボタン（設定「一般」の「アンインストール」）。
+pub fn small_danger(ui: &mut Ui, p: &Palette, text: &str) -> Response {
+    ui.add(
+        egui::Button::new(RichText::new(text.to_owned()).font(bold(12.0)).color(p.det))
+            .fill(Color32::TRANSPARENT)
+            .stroke(Stroke::new(1.0_f32, p.det))
+            .corner_radius(CornerRadius::same(6))
+            .min_size(Vec2::new(0.0, 28.0)),
+    )
+}
+
 /// アイコンだけのボタン（URLをコピー・ブラウザで開く・削除）。`label` はツールチップと読み上げ用。
 pub fn icon_button(ui: &mut Ui, p: &Palette, glyph: &str, label: &str) -> Response {
     let r = ui.scope(|ui| {

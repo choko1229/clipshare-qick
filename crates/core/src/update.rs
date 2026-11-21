@@ -26,6 +26,8 @@ pub enum UpdateDecision {
     ManualOnly {
         version: Version,
         notes: String,
+        /// 配布ファイル（.msix）の容量（画面 21 ⑯「[FILE SIZE]」）。
+        size_bytes: u64,
     },
     /// 新しいバージョンはあるが配布ファイル（.msix）が無い。
     NoAsset,
@@ -78,18 +80,19 @@ pub fn decide(current: &str, latest: &LatestRelease) -> Result<UpdateDecision, U
             .as_deref()
             .is_some_and(|h| h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()))
     });
-    match (verifiable, packages.is_empty()) {
+    match (verifiable, packages.first()) {
         (Some(a), _) => Ok(UpdateDecision::Available {
             version: new,
             asset: (*a).clone(),
             notes: latest.notes.clone(),
             required,
         }),
-        (None, false) => Ok(UpdateDecision::ManualOnly {
+        (None, Some(p)) => Ok(UpdateDecision::ManualOnly {
             version: new,
             notes: latest.notes.clone(),
+            size_bytes: p.size_bytes,
         }),
-        (None, true) => Ok(UpdateDecision::NoAsset),
+        (None, None) => Ok(UpdateDecision::NoAsset),
     }
 }
 
@@ -188,8 +191,13 @@ mod tests {
         let mut a = msix();
         a.sha256 = None;
         match decide("1.0.0", &latest("1.2.3", None, vec![a.clone()])).unwrap() {
-            UpdateDecision::ManualOnly { version, .. } => {
-                assert_eq!(version, Version::new(1, 2, 3))
+            UpdateDecision::ManualOnly {
+                version,
+                size_bytes,
+                ..
+            } => {
+                assert_eq!(version, Version::new(1, 2, 3));
+                assert_eq!(size_bytes, a.size_bytes, "画面 21 ⑯ に容量を出す");
             }
             other => panic!("{other:?}"),
         }

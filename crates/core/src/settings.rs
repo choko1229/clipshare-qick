@@ -458,6 +458,33 @@ mod tests {
         assert_eq!(s.advanced.history_limit, 50);
     }
 
+    /// 更新版デザイン 12・23 と SPEC §8 の既定値（設定ファイルが無い・項目が無い場合）。
+    #[test]
+    fn toggle_defaults_follow_design() {
+        let s = Settings::default();
+        assert!(!s.watch_videos, "12: 動画も自動でアップロード は OFF");
+        assert!(s.context_menu_enabled, "12: 右クリックメニュー は ON");
+        assert!(s.steamvr_enabled, "12: SteamVR は ON");
+        assert!(s.auto_update_check, "12: 更新を自動で確認 は ON");
+        assert!(s.notifications.windows_toast, "23: Windowsの通知 は ON");
+        assert!(s.notifications.vr_hud, "23: VR内の通知 は ON");
+        assert_eq!(s.default_quality, Quality::Shrink, "10: 既定の画質は縮小");
+
+        // 以前の版の設定ファイル（項目が無い）でも同じ既定値になる
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("settings.json");
+        std::fs::write(&p, r#"{"defaultQuality":"original"}"#).unwrap();
+        let old = SettingsStore::load(&p).get();
+        assert_eq!(
+            old.default_quality,
+            Quality::Original,
+            "保存済みの選択は変えない"
+        );
+        assert!(!old.watch_videos);
+        assert!(old.notifications.windows_toast && old.notifications.vr_hud);
+        assert!(old.context_menu_enabled && old.steamvr_enabled);
+    }
+
     #[test]
     fn api_url_validation() {
         assert!(validate_api_url("https://clipshare.link").is_ok());

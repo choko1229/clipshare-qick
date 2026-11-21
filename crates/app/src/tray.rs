@@ -106,7 +106,7 @@ fn icon_for(state: TrayState, frame: u32) -> Option<tray_icon::Icon> {
             None,
             Some(frame as f32 * std::f32::consts::TAU / 8.0),
         ),
-        TrayState::Error | TrayState::Offline => (GREEN, Some(RED), None),
+        TrayState::Error | TrayState::Offline | TrayState::Blocked => (GREEN, Some(RED), None),
         TrayState::Paused => (GRAY, None, None),
         TrayState::NeedsLogin => (GREEN, Some(YELLOW), None),
     };
@@ -203,8 +203,8 @@ impl Tray {
             if *id == ids.0 {
                 s.send(Command::Open(Screen::History));
             } else if *id == ids.1 {
-                let on = !s.engine.settings().get().auto_upload_active();
-                s.send(Command::SetAutoUpload(on));
+                // メニューのチェックは押した時点で反転するため、結果に関係なく refresh で実際の状態に戻す。
+                crate::actions::toggle_auto_upload(&s);
             } else if *id == ids.2 {
                 s.send(Command::Open(Screen::Settings(SettingsTab::Upload)));
             } else if *id == ids.3 {
@@ -245,6 +245,8 @@ impl Tray {
     pub fn refresh(&mut self, shared: &Arc<Shared>) {
         let snap = shared.engine.snapshot().borrow().clone();
         self.auto_item.set_checked(snap.auto_upload);
+        // 403 の間は操作できない（Q-031）
+        self.auto_item.set_enabled(!snap.blocked);
         let uploading = snap.tray == TrayState::Uploading;
         if uploading {
             self.frame = self.frame.wrapping_add(1);

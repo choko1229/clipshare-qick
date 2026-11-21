@@ -108,13 +108,20 @@ impl SettingsWindow {
     fn upload(&mut self, ui: &mut Ui, p: &Palette, shared: &Arc<Shared>) -> Action {
         let s = shared.engine.settings().get();
         widgets::card(ui, p, |ui| {
-            let mut on = s.auto_upload_active();
+            // 403 の間は実際の状態（OFF）を表示し、操作できないようにする（Q-031）。
+            let snap = shared.engine.snapshot().borrow().clone();
+            let mut on = snap.auto_upload;
             if setting_row(
                 ui,
                 p,
                 "自動アップロード",
                 "VRChatで撮影した写真を自動でアップロードします。",
-                |ui| widgets::toggle(ui, p, &mut on, "自動アップロード").changed(),
+                |ui| {
+                    ui.add_enabled_ui(!snap.blocked, |ui| {
+                        widgets::toggle(ui, p, &mut on, "自動アップロード").changed()
+                    })
+                    .inner
+                },
             ) && let Err(e) = shared.engine.set_auto_upload(on)
             {
                 self.error = Some(e.to_string());
@@ -211,7 +218,9 @@ impl SettingsWindow {
             widgets::tinted(ui, p.des, p.des, |ui| {
                 ui.label(widgets::strong("連携できませんでした", p));
                 ui.label(widgets::muted(super::wizard::login_failure_text(code), p));
-                if code == "FORBIDDEN" && widgets::small(ui, p, "お問い合わせ").clicked() {
+                if super::wizard::failure_action(code) == super::wizard::FailureAction::Contact
+                    && widgets::small(ui, p, "お問い合わせ").clicked()
+                {
                     crate::platform::open_url(&crate::actions::contact_url(shared));
                 }
                 ui.horizontal(|ui| {
@@ -271,11 +280,9 @@ impl SettingsWindow {
                         shared.rt.spawn(async move {
                             match s.engine.logout().await {
                                 Ok(true) => {}
-                                Ok(false) => crate::toast::show_simple(
-                                    &s,
-                                    "連携の解除が完了していません",
-                                    "Clipshareの「連携アプリ」からこのPCを解除してください。",
-                                ),
+                                Ok(false) => {
+                                    crate::toast::show(&s, &crate::toast::unlink_incomplete_spec())
+                                }
                                 Err(e) => tracing::warn!(error = %e, "ログアウトできませんでした"),
                             }
                             s.reset_login();
@@ -401,148 +408,144 @@ impl SettingsWindow {
     }
 
     fn notifications(&mut self, ui: &mut Ui, p: &Palette, shared: &Arc<Shared>) -> Action {
+        // 画面 23: 区切り線の一覧（説明文なし）。
         let s = shared.engine.settings().get();
-        widgets::card(ui, p, |ui| {
-            let mut t = s.notifications.windows_toast;
-            if setting_row(ui, p, "Windowsの通知", "", |ui| {
-                widgets::toggle(ui, p, &mut t, "Windowsの通知").changed()
-            }) {
-                self.save(shared, |x| x.notifications.windows_toast = t);
-            }
-            widgets::divider(ui, p);
-            let mut v = s.notifications.vr_hud;
-            if setting_row(ui, p, "VR内の通知", "", |ui| {
-                widgets::toggle(ui, p, &mut v, "VR内の通知").changed()
-            }) {
-                self.save(shared, |x| x.notifications.vr_hud = v);
-            }
-        });
+        let mut t = s.notifications.windows_toast;
+        if setting_row(ui, p, "Windowsの通知", "", |ui| {
+            widgets::toggle(ui, p, &mut t, "Windowsの通知").changed()
+        }) {
+            self.save(shared, |x| x.notifications.windows_toast = t);
+        }
+        widgets::divider(ui, p);
+        let mut v = s.notifications.vr_hud;
+        if setting_row(ui, p, "VR内の通知", "", |ui| {
+            widgets::toggle(ui, p, &mut v, "VR内の通知").changed()
+        }) {
+            self.save(shared, |x| x.notifications.vr_hud = v);
+        }
         Action::None
     }
 
+    /// 画面 12「一般」: 1 つの一覧（区切り線）で、デザインと同じ並び。
     fn general(&mut self, ui: &mut Ui, p: &Palette, shared: &Arc<Shared>) -> Action {
         let s = shared.engine.settings().get();
         let mut action = Action::None;
-        widgets::card(ui, p, |ui| {
-            let mut st = s.launch_at_startup;
-            if setting_row(
-                ui,
-                p,
-                "Windows起動時に開始",
-                "ログイン後、バックグラウンドで常駐します。",
-                |ui| widgets::toggle(ui, p, &mut st, "Windows起動時に開始").changed(),
-            ) {
-                self.save(shared, |x| x.launch_at_startup = st);
+        let mut st = s.launch_at_startup;
+        if setting_row(
+            ui,
+            p,
+            "Windows起動時に開始",
+            "ログイン後、バックグラウンドで常駐します。",
+            |ui| widgets::toggle(ui, p, &mut st, "Windows起動時に開始").changed(),
+        ) {
+            self.save(shared, |x| x.launch_at_startup = st);
+        }
+        widgets::divider(ui, p);
+        let mut up = s.auto_update_check;
+        if setting_row(
+            ui,
+            p,
+            "更新を自動で確認",
+            "新しいバージョンがあるとお知らせします。",
+            |ui| {
+                // 右から順に並ぶ（トグルが右端、その左に版のバッジ）
+                let changed = widgets::toggle(ui, p, &mut up, "更新を自動で確認").changed();
+                widgets::badge(ui, p, &version_text(), Tone::Muted);
+                changed
+            },
+        ) {
+            self.save(shared, |x| x.auto_update_check = up);
+        }
+        widgets::divider(ui, p);
+        let mut cm = s.context_menu_enabled;
+        if setting_row(ui, p, "右クリックメニュー", "", |ui| {
+            widgets::toggle(ui, p, &mut cm, "右クリックメニュー").changed()
+        }) {
+            self.save(shared, |x| x.context_menu_enabled = cm);
+        }
+        widgets::divider(ui, p);
+        let mut vr = s.steamvr_enabled;
+        if setting_row(ui, p, "SteamVR", "", |ui| {
+            widgets::toggle(ui, p, &mut vr, "SteamVR").changed()
+        }) {
+            self.save(shared, |x| x.steamvr_enabled = vr);
+        }
+        widgets::divider(ui, p);
+        if setting_row(ui, p, "更新を確認", "", |ui| {
+            widgets::small(ui, p, "更新を確認").clicked()
+        }) {
+            crate::updater::check_now(shared, true);
+            action = Action::Open(Screen::Update);
+        }
+        widgets::divider(ui, p);
+        if setting_row(
+            ui,
+            p,
+            "ログ",
+            "エラーの調査に使えます。",
+            |ui| widgets::small(ui, p, "ログを開く").clicked(),
+        ) {
+            crate::actions::open_logs(shared);
+        }
+        widgets::divider(ui, p);
+        let label = if self.copied_at.is_some_and(|t| t.elapsed().as_secs() < 2) {
+            "✓"
+        } else {
+            "コピー"
+        };
+        if setting_row(
+            ui,
+            p,
+            "診断情報",
+            "問い合わせ用に、バージョンと設定の概要をコピーします。",
+            |ui| widgets::small(ui, p, label).clicked(),
+        ) {
+            let text = crate::actions::diagnostics(shared);
+            if crate::clipboard::SystemClipboard.set(&text) {
+                self.copied_at = Some(std::time::Instant::now());
+            } else {
+                tracing::warn!("診断情報をクリップボードに入れられませんでした");
             }
-            widgets::divider(ui, p);
-            let mut up = s.auto_update_check;
-            let mut changed = false;
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(widgets::strong("更新を自動で確認", p));
-                    ui.label(widgets::muted(
-                        "新しいバージョンがあるとお知らせします。",
-                        p,
-                    ));
-                });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    changed = widgets::toggle(ui, p, &mut up, "更新を自動で確認").changed();
-                    ui.label(widgets::muted(&format!("v{}", cq_core::APP_VERSION), p));
-                });
-            });
-            if changed {
-                self.save(shared, |x| x.auto_update_check = up);
-            }
-            widgets::divider(ui, p);
-            let mut cm = s.context_menu_enabled;
-            if setting_row(ui, p, "右クリックメニュー", "", |ui| {
-                widgets::toggle(ui, p, &mut cm, "右クリックメニュー").changed()
-            }) {
-                self.save(shared, |x| x.context_menu_enabled = cm);
-            }
-            widgets::divider(ui, p);
-            let mut vr = s.steamvr_enabled;
-            if setting_row(ui, p, "SteamVR", "", |ui| {
-                widgets::toggle(ui, p, &mut vr, "SteamVR").changed()
-            }) {
-                self.save(shared, |x| x.steamvr_enabled = vr);
-            }
-        });
-        ui.add_space(8.0);
-        widgets::card(ui, p, |ui| {
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(widgets::strong("ログ", p));
-                    ui.label(widgets::muted("エラーの調査に使えます。", p));
-                });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if widgets::secondary(ui, p, "ログを開く").clicked() {
-                        crate::actions::open_logs(shared);
-                    }
-                });
-            });
-            widgets::divider(ui, p);
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(widgets::strong("診断情報", p));
-                    ui.label(widgets::muted(
-                        "問い合わせ用に、バージョンと設定の概要をコピーします。",
-                        p,
-                    ));
-                });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let label = if self.copied_at.is_some_and(|t| t.elapsed().as_secs() < 2) {
-                        "✓"
-                    } else {
-                        "コピー"
-                    };
-                    if widgets::secondary(ui, p, label).clicked() {
-                        let text = crate::actions::diagnostics(shared);
-                        if crate::clipboard::SystemClipboard.set(&text) {
-                            self.copied_at = Some(std::time::Instant::now());
-                        }
-                    }
-                });
-            });
-        });
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            if widgets::secondary(ui, p, "更新を確認").clicked() {
-                crate::updater::check_now(shared, true);
-                action = Action::Open(Screen::Update);
-            }
-            if widgets::secondary(ui, p, "アンインストール").clicked() {
-                action = Action::Open(Screen::Uninstall);
-            }
-        });
+        }
+        widgets::divider(ui, p);
+        if setting_row(ui, p, "アンインストール", "", |ui| {
+            widgets::small_danger(ui, p, "アンインストール").clicked()
+        }) {
+            action = Action::Open(Screen::Uninstall);
+        }
         action
     }
 
+    /// 画面 24「情報」。ボタンの文言はデザインの仮置き（「GitHubを開く」「開く」）をそのまま使う。
     fn about(&mut self, ui: &mut Ui, p: &Palette, shared: &Arc<Shared>) -> Action {
-        widgets::card(ui, p, |ui| {
-            ui.horizontal(|ui| {
-                widgets::logo(ui, p, 36.0);
-                ui.vertical(|ui| {
-                    ui.label(widgets::strong("Clipshare Quick", p));
-                    ui.label(widgets::muted(
-                        &format!("バージョン {}", cq_core::APP_VERSION),
-                        p,
-                    ));
-                });
-            });
-            widgets::divider(ui, p);
-            stat_row(ui, p, "ライセンス", "MIT");
-            ui.horizontal(|ui| {
-                if widgets::small(ui, p, "ソースコード").clicked() {
-                    crate::platform::open_url("https://github.com/choko1229/clipshare-qick");
-                }
-                if widgets::small(ui, p, "更新履歴").clicked() {
-                    crate::platform::open_url(&crate::actions::download_page_url(shared));
-                }
-            });
+        setting_row(ui, p, "バージョン", "", |ui| {
+            widgets::badge(ui, p, &version_text(), Tone::Muted);
+            false
         });
+        widgets::divider(ui, p);
+        setting_row(ui, p, "ライセンス", "", |ui| {
+            widgets::badge(ui, p, "MIT", Tone::Muted);
+            false
+        });
+        widgets::divider(ui, p);
+        if setting_row(ui, p, "ソースコード", "", |ui| {
+            widgets::small(ui, p, "GitHubを開く").clicked()
+        }) {
+            crate::platform::open_url(crate::actions::SOURCE_URL);
+        }
+        widgets::divider(ui, p);
+        if setting_row(ui, p, "更新履歴", "", |ui| {
+            widgets::small(ui, p, "開く").clicked()
+        }) {
+            crate::platform::open_url(&crate::actions::download_page_url(shared));
+        }
         Action::None
     }
+}
+
+/// 版の表示（「v0.1.0」）。
+fn version_text() -> String {
+    format!("v{}", cq_core::APP_VERSION)
 }
 
 /// 見出し＋説明＋右側の操作の 1 行。右側が変更を返したら `true`。

@@ -230,9 +230,15 @@ fn toaster() -> Option<&'static Toaster> {
         .as_ref()
 }
 
-/// 通知を出す。
+/// 設定「通知」の「Windowsの通知」（画面 23）が ON か。
+pub fn windows_toast_enabled(settings: &cq_core::settings::Settings) -> bool {
+    settings.notifications.windows_toast
+}
+
+/// 通知を出す（設定で OFF なら何もしない）。
 pub fn show(shared: &Arc<Shared>, spec: &ToastSpec) {
-    if !shared.engine.settings().get().notifications.windows_toast {
+    if !windows_toast_enabled(&shared.engine.settings().get()) {
+        tracing::debug!("Windowsの通知が OFF のため表示しません");
         return;
     }
     let Some(t) = toaster() else { return };
@@ -271,6 +277,34 @@ fn show_inner(shared: &Arc<Shared>, t: &Toaster, spec: &ToastSpec) -> windows::c
         }
     }
     Ok(())
+}
+
+/// 新しいバージョンの通知（デザイン 16「新しいバージョン」: 本文なし、「開く」で画面 21）。
+pub fn new_version_spec() -> ToastSpec {
+    ToastSpec {
+        title: "新しいバージョンがあります".into(),
+        body: String::new(),
+        buttons: vec![ToastButton {
+            label: "開く",
+            action: ToastAction::Update,
+        }],
+        tag: Some("update"),
+        launch: ToastAction::Update,
+    }
+}
+
+/// ログアウト時にサーバー側の失効ができなかった通知（デザイン 16「連携の解除が未完了」。文言は QUESTIONS Q-033）。
+pub fn unlink_incomplete_spec() -> ToastSpec {
+    ToastSpec {
+        title: "連携の解除が完了していません".into(),
+        body: "オフラインだったため、サーバー側のトークンは残っています。Clipshareの「連携アプリ」からこのPCを解除してください。".into(),
+        buttons: vec![ToastButton {
+            label: "連携アプリを開く",
+            action: ToastAction::ManagePage,
+        }],
+        tag: None,
+        launch: ToastAction::ManagePage,
+    }
 }
 
 /// ボタンなしの通知。
@@ -573,6 +607,52 @@ mod tests {
             message: "x".into(),
         };
         assert!(spec_for(&failed).is_none());
+    }
+
+    /// 更新版デザイン 16 の追加 4 種。
+    #[test]
+    fn added_toasts_follow_design() {
+        let s = spec_for(&EngineEvent::AutoUploadChanged { enabled: true }).unwrap();
+        assert_eq!(s.title, "自動アップロードを再開しました");
+        assert!(s.body.is_empty() && s.buttons.is_empty());
+
+        let s = new_version_spec();
+        assert_eq!(s.title, "新しいバージョンがあります");
+        assert!(s.body.is_empty());
+        assert_eq!(s.buttons.len(), 1);
+        assert_eq!(s.buttons[0].label, "開く");
+        assert_eq!(
+            s.buttons[0].action.clone().into_command(),
+            Some(Command::Open(Screen::Update))
+        );
+
+        let s = unlink_incomplete_spec();
+        assert_eq!(s.title, "連携の解除が完了していません");
+        assert_eq!(
+            s.body,
+            "オフラインだったため、サーバー側のトークンは残っています。Clipshareの「連携アプリ」からこのPCを解除してください。"
+        );
+        assert_eq!(s.buttons[0].label, "連携アプリを開く");
+        assert_eq!(
+            s.buttons[0].action.clone().into_command(),
+            Some(Command::OpenManagePage)
+        );
+
+        let s = spec_for(&EngineEvent::AuthExpired).unwrap();
+        assert_eq!(s.body, "再ログインするまでアップロードを停止します。");
+    }
+
+    /// 設定「通知」の「Windowsの通知」の反映（画面 23）。
+    #[test]
+    fn windows_toast_toggle_is_respected() {
+        let mut s = cq_core::settings::Settings::default();
+        assert!(windows_toast_enabled(&s), "既定は ON");
+        s.notifications.windows_toast = false;
+        assert!(!windows_toast_enabled(&s));
+        // VR内の通知の設定とは独立
+        s.notifications.windows_toast = true;
+        s.notifications.vr_hud = false;
+        assert!(windows_toast_enabled(&s));
     }
 
     #[test]
