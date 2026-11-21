@@ -129,3 +129,9 @@
 | Q-033 | 文言を変更 | 本文を「連携の解除を完了できませんでした。連携アプリで状態を確認してください。」に（`toast::unlink_incomplete_spec`、テスト `added_toasts_follow_design`、`design/16`） |
 
 `design/` のスナップショットは手で編集した。キャンバス（正）への反映は `design/README.md` の依頼リスト 13〜16。
+
+## 画面 22 の文言の統一（2026-11-22、オーナー指示）
+
+| 画面 | 要素 | 変更前 | 変更後 | 反映 |
+|---|---|---|---|---|
+| 22 アンインストールの完了 | 「連携の解除が完了していません」の帯の本文 | 「オフラインだったため、サーバー側のトークンは残っています。Clipshareの「連携アプリ」からこのPCを解除してください。」 | 「連携の解除を完了できませんでした。連携アプリで状態を確認してください。」（画面 16 の通知と同じ、Q-033） | `ui/uninstall.rs`（`unlink_notice`）、`actions.rs`（`UNLINK_INCOMPLETE_TITLE`・`UNLINK_INCOMPLETE_BODY` を通知と共有）、テスト `unlink_notice_uses_confirmed_text`、`design/22` |
