@@ -161,7 +161,7 @@ pub fn icon_button(ui: &mut Ui, p: &Palette, glyph: &str, label: &str) -> Respon
 }
 
 /// 状態のバッジ（処理中・失敗・期限切れ・待機中など）。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
     Primary,
     Danger,

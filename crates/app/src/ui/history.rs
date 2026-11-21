@@ -99,14 +99,7 @@ impl HistoryPanel {
         ui.horizontal(|ui| {
             widgets::logo(ui, p, 24.0);
             ui.label(widgets::strong("Clipshare Quick", p));
-            let tone = match snap.tray {
-                TrayState::Idle => Tone::Primary,
-                TrayState::Uploading => Tone::Primary,
-                TrayState::Error | TrayState::Offline | TrayState::Blocked => Tone::Danger,
-                TrayState::Paused => Tone::Muted,
-                TrayState::NeedsLogin => Tone::Warning,
-            };
-            widgets::badge(ui, p, snap.tray.label(), tone);
+            widgets::badge(ui, p, snap.tray.label(), header_tone(snap.tray));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if widgets::icon_button(ui, p, "⚙", "設定").clicked() {
                     action = Action::Open(Screen::Settings(SettingsTab::Upload));
@@ -182,6 +175,16 @@ fn anonymous_notice(ui: &mut Ui, p: &Palette, snap: &Snapshot) -> Option<Action>
         }
     });
     action
+}
+
+/// ヘッダーの状態バッジの色。「利用不可」はデザイン 09 のとおり灰色（再試行で直るエラーではないため）。
+pub fn header_tone(state: TrayState) -> Tone {
+    match state {
+        TrayState::Idle | TrayState::Uploading => Tone::Primary,
+        TrayState::Error | TrayState::Offline => Tone::Danger,
+        TrayState::Paused | TrayState::Blocked => Tone::Muted,
+        TrayState::NeedsLogin => Tone::Warning,
+    }
 }
 
 /// 共有URLの表示用（スキームを省く）。
@@ -363,6 +366,13 @@ fn footer(ui: &mut Ui, p: &Palette, shared: &Arc<Shared>, snap: &Snapshot) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blocked_badge_is_muted_like_design() {
+        assert_eq!(header_tone(TrayState::Blocked), Tone::Muted);
+        assert_eq!(header_tone(TrayState::Error), Tone::Danger);
+        assert_eq!(header_tone(TrayState::Idle), Tone::Primary);
+    }
 
     #[test]
     fn short_url_strips_scheme() {

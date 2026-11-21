@@ -293,11 +293,11 @@ pub fn new_version_spec() -> ToastSpec {
     }
 }
 
-/// ログアウト時にサーバー側の失効ができなかった通知（デザイン 16「連携の解除が未完了」。文言は QUESTIONS Q-033）。
+/// ログアウト時にサーバー側の失効ができなかった通知（デザイン 16「連携の解除が未完了」。本文は QUESTIONS Q-033 で確定、2026-11-22）。
 pub fn unlink_incomplete_spec() -> ToastSpec {
     ToastSpec {
         title: "連携の解除が完了していません".into(),
-        body: "オフラインだったため、サーバー側のトークンは残っています。Clipshareの「連携アプリ」からこのPCを解除してください。".into(),
+        body: "連携の解除を完了できませんでした。連携アプリで状態を確認してください。".into(),
         buttons: vec![ToastButton {
             label: "連携アプリを開く",
             action: ToastAction::ManagePage,
@@ -630,7 +630,7 @@ mod tests {
         assert_eq!(s.title, "連携の解除が完了していません");
         assert_eq!(
             s.body,
-            "オフラインだったため、サーバー側のトークンは残っています。Clipshareの「連携アプリ」からこのPCを解除してください。"
+            "連携の解除を完了できませんでした。連携アプリで状態を確認してください。"
         );
         assert_eq!(s.buttons[0].label, "連携アプリを開く");
         assert_eq!(
