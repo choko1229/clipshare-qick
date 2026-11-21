@@ -146,9 +146,9 @@ pub struct AdvancedSettings {
 
 pub const DEFAULT_API_BASE_URL: &str = "https://clipshare.link";
 
-/// 403 の案内先（お問い合わせページ）の既定パス。
-/// **暫定値**: Clipshare 側の確定値（PROGRESS.md / API_CONTRACT.md の「403案内先URL」）が届いたら差し替える
-/// （QUESTIONS Q-027「要確認」）。設定の `advanced.contactPath` でも変更できる。
+/// 403 の案内先（お問い合わせページ）の既定パス。既定の API ベース URL と合わせて
+/// `https://clipshare.link/contact`（QUESTIONS Q-027、オーナー確定 2026-11-21）。
+/// 設定の `advanced.contactPath` でも変更できる（同じホストのパスのみ）。
 pub const DEFAULT_CONTACT_PATH: &str = "/contact";
 
 impl Default for AdvancedSettings {

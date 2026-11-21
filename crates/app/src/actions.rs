@@ -192,3 +192,36 @@ pub fn spawn_settings_effects(shared: &Arc<Shared>) {
         }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Q-027: 既定の設定では 403 の案内先が `https://clipshare.link/contact` になる。
+    #[test]
+    fn default_contact_url_is_clipshare_contact_page() {
+        let s = Settings::default();
+        assert_eq!(
+            join_web(&s, &s.advanced.contact_path),
+            "https://clipshare.link/contact"
+        );
+    }
+
+    #[test]
+    fn join_web_ignores_trailing_slash_of_base() {
+        let mut s = Settings::default();
+        s.advanced.api_base_url = "https://clipshare.link/".to_owned();
+        assert_eq!(
+            join_web(&s, &s.advanced.contact_path),
+            "https://clipshare.link/contact"
+        );
+        assert_eq!(
+            join_web(&s, &s.advanced.manage_apps_path),
+            "https://clipshare.link/settings/apps"
+        );
+        assert_eq!(
+            join_web(&s, &s.advanced.download_page_path),
+            "https://clipshare.link/qick/download"
+        );
+    }
+}
