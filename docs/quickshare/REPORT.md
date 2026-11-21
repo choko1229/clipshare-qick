@@ -141,3 +141,41 @@ QUESTIONS.md の Q-001〜Q-025（Q-004・Q-014・Q-015 は確認済み、ほか�
 あわせて、連携アプリ管理ページの既定 URL を `{APIベースURL}/settings/apps` に修正した（Q-014）。動画の処理完了を知る API は無いため、`PROCESSING` のまま URL をコピーする現状仕様を維持した（Q-015）。
 
 テスト結果（v1.1 追従後）: `cargo fmt --check`・`cargo clippy --workspace --all-targets -D warnings` 通過、`cargo test --workspace` **120 件成功**（4 回連続）、`cargo build --workspace --release` 成功。
+
+## 9. オーナー回答の反映（2026-11-21）
+
+### 9.1 決定事項の実装
+
+| 決定 | 実装 | テスト |
+|---|---|---|
+| Q-011 既定の画質は縮小 | `Settings::default` と `Quality::default` を縮小に。保存済みの設定は必ず `defaultQuality` を含むため既存の利用者は変わらない（マイグレーション不要）。右クリックの「（既定）」と、設定を読めない場合の既定も縮小 | `default_quality_is_shrink_but_saved_choice_is_kept`、`menu` 単体、結合テスト（既定で `quality=shrink`） |
+| Q-024 403 はお問い合わせへ | 通知・履歴パネル・設定アカウント・初回セットアップの失敗画面に「お問い合わせ」。403 では「ログインして連携」「もう一度試す」「再ログイン」「再試行」を出さない。案内先は `advanced.contactPath`（既定は暫定値 `/contact`、Q-027） | `forbidden_points_to_contact_page_only`、`v11_forbidden_blocks_uploads...`（再試行できないことを追加） |
+| Q-025 sha256 は必ず返る（契約 v1.2） | 既存の実装が一致（あれば必ず検証し、不一致は破棄・エラー表示、null は手動案内）。モック相手に 3 ケースと未取得 503 を確認 | `v12_update_sha256_present_null_and_mismatch` |
+| Q-006/Q-008 自己署名・2 ファイル配布 | 公開証明書をセットアップに埋め込む（`CQ_SIGNING_CER`、`build.rs`）。Publisher を `installer/signing.json` に集約（仮値、Q-026）。release.yml は `.pfx` の Subject と一致を確認。信頼する証明書が無ければ `CERT_NOT_FOUND`。再試行時は署名を確認し直して信頼の手順の要否を決める | 手順は MANUAL_TESTS §9.1 |
+| Q-016 削除用トークンは履歴ファイル | 監査（下記）の結果、期限切れ時の削除・一時ファイル・壊れたファイル・フォルダの権限を強化 | `delete_tokens_are_purged_when_unusable_and_never_printed`、`broken_history_is_discarded_not_kept`、`stale_tmp_files_are_removed`、`data_dir_acl_is_restricted_and_still_usable` |
+| Q-007/Q-009/Q-012 | 現状維持・採用。Q-012 は `SPEC.md` §8 に確定仕様として記録、デザイン更新の依頼は `design/README.md` | — |
+
+### 9.2 削除用トークン（Q-016）の監査結果
+
+| 観点 | 結果 | 対応 |
+|---|---|---|
+| ログ・クラッシュ出力・エラー文言 | トークンは `SecretString`（`Debug`/`Display` は `***`）。使うのは削除 API のヘッダ（`set_sensitive`）だけで、ログ・エラーには出ない。パニックの記録は発生箇所のみ | 問題なし（`Debug` に出ないテストを追加） |
+| 削除成功後 | `delete_remote` でトークンを消して保存していた | 問題なし |
+| 期限切れ後 | **消していなかった** | 読み込み時と 30 秒ごとに、期限切れ・削除済み・失敗の項目のトークンを消して保存 |
+| 書き込み途中の一時ファイル | 異常終了時に `.history.json.<pid>.tmp` が残り得た | 読み込み時に削除。アンインストール時も削除 |
+| 破損時 | `history.broken.json` に退避していた（トークンを含み得る） | 退避せず削除して空の履歴で起動（トークンは 24 時間で無効、用途は自分の匿名アップロードの削除のみ） |
+| ファイルの権限 | `%LOCALAPPDATA%` から継承。開発機ではアプリコンテナーの SID や別グループにも読み取りが継承されていた | データフォルダに保護された DACL（利用者・SYSTEM・Administrators のみ）を起動時に設定。エクスプローラー（同じ利用者）からは読める |
+
+### 9.3 セルフレビュー（今回の変更分）
+
+1. **1 回目（型・エラー処理・ログ）**: 新しい設定値（`contactPath`）は同じホストのパスだけを許可する検証に追加。ACL 設定の失敗は起動を止めず警告ログ。`build.rs` は証明書を読めない場合に警告して空で続行。unsafe ブロックはすべて SAFETY コメントつき（DACL の確保・解放、SetNamedSecurityInfoW）。
+2. **2 回目（オーナー決定との照合・セキュリティ）**: 403 で再認証を促す箇所が 2 つ残っていた（設定アカウントの「ログインして連携」、履歴パネルの「ログインして制限を解除」）→ 利用停止中・403 の失敗時は出さないよう修正。秘密情報（`.pfx`・`.cer`・`.pem` など）がリポジトリに含まれていないことを確認し、`.gitignore` に証明書ファイルを追加。
+3. **3 回目（失敗時の再試行）**: セットアップで信頼に成功した後にインストールだけ失敗した場合、再試行で消した一時証明書を探して `CERT_NOT_FOUND` になる経路を発見 → 再試行時に署名を確認し直し、信頼の手順が要るときだけ行うよう修正。一時証明書は信頼に成功した後だけ削除。
+
+### 9.4 テスト結果（GNU ツールチェーン 1.100.0、ローカル）
+
+`cargo fmt --all -- --check` 通過、`cargo clippy --workspace --all-targets -- -D warnings` 通過、`cargo test --workspace` **127 件成功**（3 回連続）。`cargo build --workspace --release` 成功。CI（MSVC）は PR で実行。
+
+### 9.5 オーナー待ち
+- Q-026 Publisher 名（仮値 `CN=Clipshare Quick`、`installer/signing.json`）。証明書を作る前に決める必要がある
+- Q-027 403 の案内先 URL（暫定値 `{APIベースURL}/contact`、`DEFAULT_CONTACT_PATH`）
