@@ -1,4 +1,4 @@
 {
-  "_comment": "MSIX の Publisher（証明書の Subject）を 1 か所で管理する。build-msix.ps1 / new-dev-certificate.ps1 / release.yml がここを読む。値は仮（QUESTIONS Q-026: 要決定・オーナー）。証明書の Subject と完全に一致させること。秘密情報は置かない。",
-  "publisher": "CN=Clipshare Quick"
+  "_comment": "MSIX の Publisher（証明書の Subject）を 1 か所で管理する。build-msix.ps1 / new-dev-certificate.ps1 / release.yml がここを読む。値はオーナー確定（QUESTIONS Q-026、2026-11-21）。証明書の Subject と完全に一致させること。秘密情報は置かない。",
+  "publisher": "CN=choko1229"
 }

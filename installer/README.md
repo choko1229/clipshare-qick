@@ -10,7 +10,7 @@
 | `AppxManifest.xml` | MSIX のマニフェスト（右クリック拡張・実行エイリアス・スタートアップ・書き込み仮想化の無効化） |
 | `build-msix.ps1` | release ビルドの成果物から `.msix` を作り、必要なら署名し、SHA-256 を出す |
 | `new-dev-certificate.ps1` | 自己署名のコード署名証明書を作る（秘密鍵はリポジトリの外へ出力） |
-| `signing.json` | Publisher（証明書の Subject）を 1 か所で管理する。**仮値**（QUESTIONS Q-026、要決定・オーナー） |
+| `signing.json` | Publisher（証明書の Subject）を 1 か所で管理する。値は `CN=choko1229`（QUESTIONS Q-026、確認済み） |
 
 配布物（GitHub Releases に添付するもの）:
 
@@ -52,7 +52,7 @@ Import-Certificate -FilePath .\ClipshareQuick.cer -CertStoreLocation Cert:\Local
 Add-AppxPackage .\dist\ClipshareQuick-0.1.0.msix
 # 確認が終わったら
 Get-AppxPackage choko1229.ClipshareQuick | Remove-AppxPackage
-Get-ChildItem Cert:\LocalMachine\TrustedPeople | Where-Object Subject -eq "CN=Clipshare Dev" | Remove-Item
+Get-ChildItem Cert:\LocalMachine\TrustedPeople | Where-Object Subject -eq "CN=choko1229" | Remove-Item
 ```
 
 確認項目は `docs/quickshare/MANUAL_TESTS.md` を参照。
