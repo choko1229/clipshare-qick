@@ -133,14 +133,29 @@ impl std::fmt::Debug for SetupApp {
     }
 }
 
+/// ビルド時に埋め込んだ自己署名の公開証明書（無ければ空。build.rs 参照）。
+const EMBEDDED_CER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/signing.cer"));
+
+/// 信頼手順で使う証明書ファイル。埋め込みがあれば一時フォルダに書き出し、無ければ同じフォルダの .cer を使う。
+fn certificate_file(dir: &Path) -> Option<PathBuf> {
+    if !EMBEDDED_CER.is_empty() {
+        let p = std::env::temp_dir().join(format!("ClipshareQuick-{}.cer", std::process::id()));
+        match std::fs::write(&p, EMBEDDED_CER) {
+            Ok(()) => return Some(p),
+            Err(e) => tracing::warn!(error = %e, "証明書を書き出せませんでした"),
+        }
+    }
+    std::fs::read_dir(dir).ok().and_then(|rd| {
+        rd.flatten()
+            .map(|e| e.path())
+            .find(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("cer")))
+    })
+}
+
 impl SetupApp {
     pub fn new(dir: &Path) -> Self {
         let package = find_package(dir);
-        let cert = std::fs::read_dir(dir).ok().and_then(|rd| {
-            rd.flatten()
-                .map(|e| e.path())
-                .find(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("cer")))
-        });
+        let cert = certificate_file(dir);
         let signed_ok = package
             .as_deref()
             .is_some_and(|p| crate::packaging::verify_signature(p).is_ok());
@@ -218,9 +233,8 @@ impl SetupApp {
         };
         let opts = self.opts;
         let state = Arc::clone(&self.state);
-        let trust_cert = (self.trust && !self.signed_ok)
-            .then(|| self.cert.clone())
-            .flatten();
+        let trust_requested = self.trust && !self.signed_ok;
+        let trust_cert = self.cert.clone();
         std::thread::spawn(move || {
             let set = |p: Page| {
                 if let Ok(mut g) = state.lock() {
@@ -228,11 +242,22 @@ impl SetupApp {
                 }
                 ctx.request_repaint();
             };
-            if let Some(cer) = trust_cert
-                && let Err(code) = crate::packaging::trust_certificate(&cer)
-            {
-                set(Page::Failed { step: 0, code });
-                return;
+            match (trust_requested, trust_cert) {
+                (true, None) => {
+                    // 信頼する証明書が見つからない（埋め込みも同じフォルダの .cer も無い）。
+                    set(Page::Failed {
+                        step: 0,
+                        code: "CERT_NOT_FOUND".into(),
+                    });
+                    return;
+                }
+                (true, Some(cer)) => {
+                    if let Err(code) = crate::packaging::trust_certificate(&cer) {
+                        set(Page::Failed { step: 0, code });
+                        return;
+                    }
+                }
+                (false, _) => {}
             }
             set(Page::Installing {
                 step: 0,

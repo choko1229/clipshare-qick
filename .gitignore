@@ -4,6 +4,11 @@ Cargo.lock.bak
 *.pdb
 *.log
 *.pfx
+*.cer
+*.crt
+*.pem
+*.pvk
+*.spc
 *.p12
 *.snk
 *.key

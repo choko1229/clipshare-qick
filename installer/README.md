@@ -10,29 +10,32 @@
 | `AppxManifest.xml` | MSIX のマニフェスト（右クリック拡張・実行エイリアス・スタートアップ・書き込み仮想化の無効化） |
 | `build-msix.ps1` | release ビルドの成果物から `.msix` を作り、必要なら署名し、SHA-256 を出す |
 | `new-dev-certificate.ps1` | 自己署名のコード署名証明書を作る（秘密鍵はリポジトリの外へ出力） |
+| `signing.json` | Publisher（証明書の Subject）を 1 か所で管理する。**仮値**（QUESTIONS Q-026、要決定・オーナー） |
 
 配布物（GitHub Releases に添付するもの）:
 
 - `ClipshareQuick-x.y.z.msix`（署名済み）
 - `ClipshareQuick-Setup-x.y.z.exe`（画面 02・03 のセットアップ。同じフォルダの `.msix` をインストールする）
-- `ClipshareQuick.cer`（自己署名の間だけ。公開鍵のみ）
+（2 ファイル。Q-008 確定）。自己署名の公開証明書（公開鍵のみ）はセットアップに埋め込む（ビルド時に環境変数 `CQ_SIGNING_CER` で指定。`crates/app/build.rs`）。
+埋め込みが無い開発ビルドでは、セットアップと同じフォルダの `.cer` を使う。
 
 ## 1. 準備（初回のみ）
 
 1. Windows SDK（`makeappx.exe` / `signtool.exe`）を入れる。
 2. 自己署名の証明書を作る（**公開時に正式な証明書へ切り替えるかは要判断**: QUESTIONS Q-006）。
    ```powershell
-   .\installer\new-dev-certificate.ps1 -Subject "CN=Clipshare Dev" -OutDir C:\secure
+   .\installer\new-dev-certificate.ps1 -OutDir C:\secure
    ```
    - `C:\secure\ClipshareQuick-dev.pfx` は秘密に保管する（リポジトリ・チャット・ログに出さない）。
-   - Subject は `-Publisher` に渡す値と完全に一致させる。
+   - Subject は `installer/signing.json` の `publisher` を使う（MSIX の Publisher と完全に一致させるため、値はこのファイルだけで管理する）。
 
 ## 2. ビルドとパッケージ作成
 
 ```powershell
+$env:CQ_SIGNING_CER = "C:\secure\ClipshareQuick.cer"   # セットアップに埋め込む公開証明書
 cargo build --workspace --release --locked
 $env:CQ_PFX_PASSWORD = Read-Host "PFX のパスワード"   # 画面に表示されない入力にしたい場合は SecureString を使う
-.\installer\build-msix.ps1 -Version 0.1.0 -Publisher "CN=Clipshare Dev" -PfxPath C:\secure\ClipshareQuick-dev.pfx -OpenVrDll C:\path\to\openvr_api.dll
+.\installer\build-msix.ps1 -Version 0.1.0 -PfxPath C:\secure\ClipshareQuick-dev.pfx -OpenVrDll C:\path\to\openvr_api.dll
 Remove-Item Env:\CQ_PFX_PASSWORD
 ```
 
@@ -63,7 +66,7 @@ Get-ChildItem Cert:\LocalMachine\TrustedPeople | Where-Object Subject -eq "CN=Cl
 2. GitHub のリポジトリ設定 → Secrets に登録する（値はチャットやログに出さない）:
    - `MSIX_PFX_BASE64`: `.pfx` を Base64 にしたもの（`[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\secure\ClipshareQuick-dev.pfx"))`）
    - `MSIX_PFX_PASSWORD`: `.pfx` のパスワード
-   - `MSIX_PUBLISHER`: 例 `CN=Clipshare Dev`
+   - Publisher は Secrets ではなく `installer/signing.json` から読む。ワークフローは `.pfx` の Subject と一致するかを確認し、公開証明書を書き出してセットアップに埋め込む。
 3. `main` にマージ後、タグを作って push する:
    ```powershell
    git tag v0.1.0
@@ -80,3 +83,14 @@ Get-ChildItem Cert:\LocalMachine\TrustedPeople | Where-Object Subject -eq "CN=Cl
   右クリック拡張がエクスプローラーに読み込まれていて置き換えられない場合（`ERROR_PACKAGES_IN_USE`）は、次回（再起動後）の適用に切り替える。
 - 「次回起動時に更新」: 使用中なら登録を延期するオプションで適用を予約する。
 - `.appinstaller` による自動更新は使わない（GitHub Releases の URL で成立するか未検証のため。INSTRUCTIONS §5）。
+
+## 自己署名の信頼の流れ（セットアップ）
+
+1. セットアップは MSIX の署名を Windows で検証する（`WinVerifyTrust`）。信頼済みなら次の手順は出ない。
+2. 信頼されていない場合、「署名について（暫定）」で埋め込みの公開証明書の発行者・拇印を表示する。
+3. 「この署名を信頼して右クリックメニューを登録する」に同意すると、管理者の確認（UAC）の後、`certutil -addstore TrustedPeople` で
+   「ローカル コンピューター\信頼されたユーザー」に追加する（手順 3 の `Import-Certificate` と同じ場所）。
+4. 証明書が見つからない場合は `CERT_NOT_FOUND`、管理者の確認を拒否した場合は `CERT_TRUST_CANCELLED` で失敗画面になる。
+5. その後、PackageManager で MSIX をインストールする。
+
+秘密鍵（`.pfx`）・証明書ファイル（`.cer`/`.pem` など）はリポジトリに入れない（`.gitignore` で除外）。

@@ -17,8 +17,6 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       - name: テスト
         run: cargo test --workspace --locked
-      - name: ビルド
-        run: cargo build --workspace --release --locked
       - name: バージョン
         id: ver
         shell: pwsh
@@ -35,11 +33,24 @@ jobs:
           $path = Join-Path $env:RUNNER_TEMP "sign.pfx"
           [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($env:PFX_BASE64))
           "PFX_PATH=$path" >> $env:GITHUB_ENV
+      - name: 公開証明書（.cer）を書き出す（セットアップに埋め込む。公開鍵のみ）
+        shell: pwsh
+        env:
+          PFX_PASSWORD: ${{ secrets.MSIX_PFX_PASSWORD }}
+        run: |
+          $pfx = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($env:PFX_PATH, $env:PFX_PASSWORD)
+          $publisher = (Get-Content installer/signing.json -Raw | ConvertFrom-Json).publisher
+          if ($pfx.Subject -ne $publisher) { throw "証明書の Subject が installer/signing.json の publisher と一致しません" }
+          $cer = Join-Path $env:RUNNER_TEMP "ClipshareQuick.cer"
+          [IO.File]::WriteAllBytes($cer, $pfx.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+          "CQ_SIGNING_CER=$cer" >> $env:GITHUB_ENV
+      - name: ビルド（証明書を埋め込む）
+        run: cargo build --workspace --release --locked
       - name: MSIX を作成・署名
         shell: pwsh
         env:
           CQ_PFX_PASSWORD: ${{ secrets.MSIX_PFX_PASSWORD }}
-        run: ./installer/build-msix.ps1 -Version ${{ steps.ver.outputs.version }} -Publisher "${{ secrets.MSIX_PUBLISHER }}" -PfxPath $env:PFX_PATH
+        run: ./installer/build-msix.ps1 -Version ${{ steps.ver.outputs.version }} -PfxPath $env:PFX_PATH
       - name: 証明書を削除
         if: always()
         shell: pwsh

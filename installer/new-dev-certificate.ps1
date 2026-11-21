@@ -10,13 +10,17 @@
   - Subject は AppxManifest.xml の Publisher と完全に一致させること。
 
 .EXAMPLE
-  .\installer\new-dev-certificate.ps1 -Subject "CN=Clipshare Dev" -OutDir C:\secure
+  .\installer\new-dev-certificate.ps1 -OutDir C:\secure
+  （Subject は installer\signing.json の publisher を使う。-Subject で上書きできる）
 #>
 param(
-  [Parameter(Mandatory = $true)][string]$Subject,
+  [string]$Subject = "",
   [Parameter(Mandatory = $true)][string]$OutDir
 )
 $ErrorActionPreference = "Stop"
+if ($Subject -eq "") {
+  $Subject = (Get-Content (Join-Path $PSScriptRoot "signing.json") -Raw -Encoding UTF8 | ConvertFrom-Json).publisher
+}
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $out = [System.IO.Path]::GetFullPath($OutDir)
 if ($out.StartsWith($repo, [System.StringComparison]::OrdinalIgnoreCase)) {

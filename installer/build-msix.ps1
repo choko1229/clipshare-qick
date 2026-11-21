@@ -13,12 +13,13 @@
   署名パスワードは引数ではなく環境変数 CQ_PFX_PASSWORD から読む（ログに残さないため）。
 
 .EXAMPLE
-  .\installer\build-msix.ps1 -Version 0.1.0 -Publisher "CN=Clipshare Dev"
-  .\installer\build-msix.ps1 -Version 0.1.0 -Publisher "CN=Clipshare Dev" -PfxPath C:\secure\dev.pfx
+  .\installer\build-msix.ps1 -Version 0.1.0
+  .\installer\build-msix.ps1 -Version 0.1.0 -PfxPath C:\secure\dev.pfx
+  （Publisher は installer\signing.json から読む。-Publisher で上書きできる）
 #>
 param(
   [Parameter(Mandatory = $true)][string]$Version,
-  [Parameter(Mandatory = $true)][string]$Publisher,
+  [string]$Publisher = "",
   [string]$PfxPath = "",
   [string]$OpenVrDll = "",
   [string]$OutDir = "dist"
@@ -26,6 +27,10 @@ param(
 $ErrorActionPreference = "Stop"
 
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Version は x.y.z 形式で指定してください" }
+if ($Publisher -eq "") {
+  $Publisher = (Get-Content (Join-Path $PSScriptRoot "signing.json") -Raw -Encoding UTF8 | ConvertFrom-Json).publisher
+}
+if ($Publisher -notmatch '^CN=') { throw "Publisher は CN= で始まる形式にしてください: $Publisher" }
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $release = Join-Path $root "target\release"
 $stage = Join-Path $root "$OutDir\stage"
