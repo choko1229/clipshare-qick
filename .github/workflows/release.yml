@@ -95,6 +95,7 @@ jobs:
           $v = "${{ steps.ver.outputs.version }}"
           $tag = "v$v"
           $repo = $env:GITHUB_REPOSITORY
+          $ProgressPreference = "SilentlyContinue"
           $drafts = @(gh api "repos/$repo/releases" --paginate --jq '.[] | {id, tag_name, draft}' | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.tag_name -ceq $tag -and $_.draft })
           if ($drafts.Count -ne 1) { throw "$tag の下書きが 1 件ではありません: $($drafts.Count)" }
           $assets = @(gh api "repos/$repo/releases/$($drafts[0].id)" --jq '.assets[] | {id, name, state, digest}' | ForEach-Object { $_ | ConvertFrom-Json })
@@ -119,8 +120,8 @@ jobs:
           $remote = (Get-FileHash (Join-Path $dir "SHA256SUMS") -Algorithm SHA256).Hash
           if ($local -cne $remote) { throw "添付した SHA256SUMS がビルドしたものと一致しません" }
           Get-Content dist/SHA256SUMS
-      - name: 失敗したら下書きを削除（公開できる状態を残さない）
-        if: failure() && steps.precheck.outcome == 'success'
+      - name: 失敗・中止したら下書きを削除（公開できる状態を残さない）
+        if: (failure() || cancelled()) && steps.precheck.outcome == 'success'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}

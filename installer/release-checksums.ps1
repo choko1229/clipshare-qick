@@ -30,7 +30,7 @@ Set-StrictMode -Version Latest
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "バージョンは X.Y.Z 形式にしてください: $Version" }
 
 $SumsName = "SHA256SUMS"
-# 順序も固定する（Q-022: セットアップ exe が主、MSIX は従）
+# 順序も固定する（Clipshare 側の決定: ダウンロードページはセットアップ exe が主、MSIX は従。QUESTIONS Q-028）
 $AssetNames = @("ClipshareQuick-Setup-$Version.exe", "ClipshareQuick-$Version.msix")
 
 function Get-Sha256Hex([string]$Path) {
@@ -96,7 +96,7 @@ for ($i = 0; $i -lt $lines.Length; $i++) {
 # 念のため、作り直した内容とバイト単位で一致すること
 if ($text -cne (New-SumsText $folder)) { throw "SHA256SUMS の内容が実ファイルから作った内容と一致しません" }
 
-# 4. GitHub の digest（Clipshare 側はこれと SHA256SUMS の一致を配布の条件にする。Q-021）
+# 4. GitHub の digest（Clipshare 側はこれと SHA256SUMS の一致を配布の条件にする。QUESTIONS Q-028）
 if ($DigestsJson -ne "") {
   $digests = $DigestsJson | ConvertFrom-Json
   foreach ($n in $expected) {
