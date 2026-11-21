@@ -177,5 +177,37 @@ QUESTIONS.md の Q-001〜Q-025（Q-004・Q-014・Q-015 は確認済み、ほか�
 `cargo fmt --all -- --check` 通過、`cargo clippy --workspace --all-targets -- -D warnings` 通過、`cargo test --workspace` **127 件成功**（3 回連続）。`cargo build --workspace --release` 成功。CI（MSVC）は PR で実行。
 
 ### 9.5 オーナー待ち
-- Q-026 Publisher 名（仮値 `CN=Clipshare Quick`、`installer/signing.json`）。証明書を作る前に決める必要がある
-- Q-027 403 の案内先 URL（暫定値 `{APIベースURL}/contact`、`DEFAULT_CONTACT_PATH`）
+- Q-026 Publisher 名（仮値 `CN=Clipshare Quick`、`installer/signing.json`）。証明書を作る前に決める必要がある → **2026-11-21 確定 `CN=choko1229`（§10）**
+- Q-027 403 の案内先 URL（暫定値 `{APIベースURL}/contact`、`DEFAULT_CONTACT_PATH`）→ **2026-11-21 確定 `https://clipshare.link/contact`（§10）**
+
+## 10. Publisher・お問い合わせ URL の確定と SHA256SUMS（2026-11-21）
+
+### 10.1 変更内容
+
+| 項目 | 実装 | 確認 |
+|---|---|---|
+| Q-026 Publisher | `installer/signing.json` を `CN=choko1229` に。仮値 `CN=Clipshare Quick` はリポジトリに残っていない（QUESTIONS・REPORT の経緯の記述のみ）。`release.yml` の Subject 照合を大文字小文字も区別する比較（`-cne`）に | メモリ上だけで作った一時的な自己署名証明書（Subject = signing.json の値）を `.pfx` に書き出して読み直し、`Subject -ceq publisher` が真（証明書ストアは使っていない） |
+| Q-027 お問い合わせ URL | 既定の `DEFAULT_API_BASE_URL` + `DEFAULT_CONTACT_PATH` = `https://clipshare.link/contact`。コメントを確定値に | `actions::tests::default_contact_url_is_clipshare_contact_page`、`join_web_ignores_trailing_slash_of_base` |
+| SHA256SUMS（最優先） | `installer/release-checksums.ps1`（作成・検証）。`release.yml` で exe と MSIX の 2 ファイルだけから作り、3 ファイルを下書きに添付 → 下書きから取り直して照合 → 失敗・中止なら下書きを削除。同じタグの Release があれば開始しない | `installer/test-release-checksums.ps1` 20 件（形式、欠落、余分な `.appinstaller`、余分な行、CRLF、BOM、大文字の hex、空白 1 つ、順序、名前の大文字小文字、改ざん、digest の不一致・null・欠落）。CI とリリースで実行 |
+| 形式 | Clipshare の契約 v1.2 がクライアントから参照できないため、sha256sum 互換 `<64桁hex>  <ファイル名>`（LF、BOM なし、exe → MSIX の順）を採用 | QUESTIONS Q-028。`API_CONTRACT.md` の先頭に「v1.2 のマージ後に照合」の注記 |
+| `.ps1` の文字コード | `installer/*.ps1` を BOM 付き UTF-8 に | Windows PowerShell 5.1 で日本語を含むスクリプトの構文解析・実行が通る |
+
+### 10.2 セルフレビュー（今回の変更分）
+
+1. **1 回目（要件との照合）**: 対象が 2 ファイルだけ・ファイル名が添付ファイル名と完全一致・`.appinstaller` などを含めない・不一致や欠落で失敗、を 1 つずつテストに対応させた。GitHub の digest も照合（Clipshare は digest と SHA256SUMS の一致を配布の条件にするため、ここで先に落とす）。digest が無い場合も失敗にした（安全側。Clipshare 側で配布されない状態を早く知らせる）。
+2. **2 回目（ワークフローの失敗経路）**: 下書きを作った後に実行が「中止」された場合に、照合していない下書きが残る経路を発見 → 削除の条件を `failure() || cancelled()` に。削除してよいのは「この実行で作った下書き」だけにするため、開始前に同じタグの Release が無いことを確認する手順を追加（公開済みの Release は対象外）。添付ファイル名は `^[A-Za-z0-9._-]+$` に限定して保存先のパスに使う。添付ファイルの取得はトークンつきの API から行い、リダイレクト先へ Authorization を送らない（PowerShell 7 の既定）。トークンはログに出さない。
+3. **3 回目（他の環境・既存ファイル）**: 既存の `new-dev-certificate.ps1`・`build-msix.ps1` が BOM 無しの UTF-8 で、オーナーが手元の Windows PowerShell 5.1 で実行すると日本語の文字列が ANSI として読まれ、構文が壊れ得ることを発見 → BOM 付きに。`release.yml` の各 `pwsh` ステップを PowerShell の構文解析器で確認し、YAML として読めることも確認。オーナーの回答の Q-021・Q-022 は Clipshare 側の番号（このリポジトリの Q-021 は署名者の固定、Q-022 は初回セットアップ前の右クリック）と判断し、このリポジトリの状態は変えずに Q-021 の補足と Q-028 に記録した。
+
+### 10.3 テスト結果（GNU ツールチェーン 1.100.0、ローカル）
+
+`cargo fmt --all -- --check` 通過、`cargo clippy --workspace --all-targets --locked -- -D warnings` 通過、`cargo test --workspace --locked` **129 件成功**、`cargo build --workspace --release --locked` 成功。`installer/test-release-checksums.ps1` 20 件成功（Windows PowerShell 5.1。CI は PowerShell 7）。`release.yml` の実行（タグの push）は行っていない（リリースの作成はオーナーの作業）。
+
+### 10.4 オーナーの作業（この順）
+
+1. PR（`feature/installer`）を確認して `main` にマージする。
+2. 証明書を作る（`CN=choko1229`）: `.\installer\new-dev-certificate.ps1 -OutDir C:\secure`。`.pfx` はリポジトリの外で秘密に保管する。
+3. GitHub の Secrets に `MSIX_PFX_BASE64`・`MSIX_PFX_PASSWORD` を登録する（`installer/README.md` §4）。
+4. `CHANGELOG.md` と `Cargo.toml` のバージョンを確定し、`main` でタグ `vX.Y.Z` を作って push する。
+5. Actions の「Release」の成功を確認し、下書きの添付ファイルが 3 つ（exe・MSIX・SHA256SUMS）であることを確認して公開する（MANUAL_TESTS §9.3）。
+6. 実機確認（MANUAL_TESTS 全体。特に §9.1 自己署名の導線、§9.3 SHA256SUMS、右クリック、SteamVR、VRChat 実撮影）。
+7. Clipshare 側の契約 v1.2 がマージされたら、`API_CONTRACT.md` を差し替えて SHA256SUMS の形式を照合する（Q-028）。

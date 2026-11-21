@@ -1,5 +1,10 @@
 # API 契約 v1（Clipshare ⇔ Clipshare Quick）
 
+> **照合待ち（2026-11-21）**: このコピーは v1.1 のスナップショット。オーナーから v1.2（`client/latest` の `sha256` は常に非 null、
+> exe と MSIX がそろった版だけを配布、SHA256SUMS と GitHub の digest の一致を配布の条件にする）の内容を受け取って実装済み。
+> **Clipshare 側（`choko1229/clipeshare` の `main`）に v1.2 がマージされたら、正本と突き合わせてこのファイルを差し替え、
+> SHA256SUMS の形式（QUESTIONS Q-028）と一致するかを確認する。**
+
 **正本は `clipeshare` リポジトリ（main）の `docs/quickshare/API_CONTRACT.md`。** `clipshare-qick` 側のコピーはスナップショット。変更は**追加のみ**（互換維持）。破壊的変更が必要なら実装せず `QUESTIONS.md` に書く。Clipshare側が変更・追加したら末尾「変更履歴」に追記する。
 本書は設計案であり、既存実装（`POST /api/qick/upload` 等）との整合をClipshare側Claude Codeがコードで確認し、**差異があればこの文書を更新**してよい（その場合は変更履歴に理由を書く）。
 

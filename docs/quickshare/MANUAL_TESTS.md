@@ -74,7 +74,7 @@
 4. 1日上限（未ログインで 6 枚目）
    - [ ] 通知「今日の上限（5件）に達しました」、トレイが一時停止。停止中に撮った写真は、翌日になっても送られない
 5. 利用停止（403。管理画面で BAN、またはモックの `banned`）
-   - [ ] 通知「このアカウントでは利用できません」と「お問い合わせ」。履歴パネル・設定アカウントに同じ帯と「お問い合わせ」（お問い合わせページが開く。URL は暫定値 `/contact`、Q-027）
+   - [ ] 通知「このアカウントでは利用できません」と「お問い合わせ」。履歴パネル・設定アカウントに同じ帯と「お問い合わせ」（`https://clipshare.link/contact` が開く。Q-027）
    - [ ] 「ログインして連携」「再ログイン」「再試行」が出ない。403 で失敗した項目に「再試行」が無い。匿名でも送られない
    - [ ] 初回セットアップで BAN 済みのアカウントを許可した場合、「連携できませんでした」と 403 の説明、「お問い合わせ」（「もう一度試す」は出ない）
 6. 連携切れ（Web の「連携アプリ」（`/settings/apps`）で解除）
@@ -161,7 +161,7 @@ Clipshare 側の `GET /api/v1/client/latest` が新しい版を返す状態で�
 
 ## 9.1 自己署名の導線（2 ファイル配布）
 
-1. `installer/signing.json` の Publisher で証明書を作り（`new-dev-certificate.ps1`）、`CQ_SIGNING_CER` を指定してビルド、`build-msix.ps1` で署名する（`installer/README.md`）。
+1. `installer/signing.json` の Publisher（`CN=choko1229`）で証明書を作り（`new-dev-certificate.ps1`）、`CQ_SIGNING_CER` を指定してビルド、`build-msix.ps1` で署名する（`installer/README.md`）。
 2. テスト用 PC（証明書を信頼していない状態）に **セットアップ exe と MSIX の 2 ファイルだけ**を置いてセットアップを起動する。
    - [ ] 「署名について（暫定）」に表示される発行者・拇印が、作成した証明書と一致する（`.cer` を同じフォルダに置かなくても表示される）
    - [ ] 「この署名を信頼して…」に同意 → UAC → 「ローカル コンピューター\信頼されたユーザー」に証明書が入り、インストールが進む
@@ -176,6 +176,17 @@ Clipshare 側の `GET /api/v1/client/latest` が新しい版を返す状態で�
 - [ ] 未ログインでアップロード → `history.json` に `deleteToken` がある。24 時間後（または期限を過ぎた状態で起動）に `deleteToken` が消えている
 - [ ] 履歴から削除した項目の `deleteToken` が消えている。ログ（`logs\`）に `deleteToken` の値が出ていない
 - [ ] `history.json` をわざと壊して起動 → 空の履歴で起動し、壊れたファイルと `.history.json.*.tmp` が残らない
+
+## 9.3 リリースの SHA256SUMS（タグの push 後）
+
+1. Actions の「Release」が成功し、下書きの Release の添付ファイルが **ちょうど 3 つ**（`ClipshareQuick-Setup-X.Y.Z.exe`、`ClipshareQuick-X.Y.Z.msix`、`SHA256SUMS`）
+   - [ ] `SHA256SUMS` が 2 行で、1 行目がセットアップ exe、2 行目が MSIX
+   - [ ] 手元で取得したファイルと一致する（PowerShell: `Get-FileHash <ファイル> -Algorithm SHA256` の値を小文字にしたものが同じ行の hex と一致）
+   - [ ] ログ「添付した実ファイルを SHA256SUMS・digest と照合」に「SHA256SUMS を確認しました」
+2. 失敗時の動き（任意。フォークや検証用のリポジトリで行う）
+   - [ ] 同じタグの下書きを残したまま再実行 → 「既にあります」で止まり、既存の下書きは消えない
+   - [ ] 照合が失敗した場合、その実行で作った下書きが削除されている
+3. 公開後、Clipshare の `GET /api/v1/client/latest` が新しい版と `sha256` を返し、ダウンロードページでセットアップ exe が主、MSIX が従になっている（Clipshare 側）
 
 ## 10. 結果の記録
 

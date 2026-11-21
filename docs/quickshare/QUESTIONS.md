@@ -14,10 +14,12 @@
 
 ## オーナー待ち（2026-11-21 時点）
 
-| 番号 | 件名 | 暫定値 | 置き場所 |
+なし。Q-026・Q-027 は 2026-11-21 に確定した（下表）。Q-028（SHA256SUMS の形式）は Clipshare 側の契約 v1.2 がマージされたら照合する。
+
+| 番号 | 件名 | 確定値 | 置き場所 |
 |---|---|---|---|
-| Q-026 | Publisher 名（証明書の CN） | `CN=Clipshare Quick` | `installer/signing.json` の `publisher`（1 か所） |
-| Q-027 | 403 の案内先（お問い合わせページ）の URL | `{APIベースURL}/contact` | `crates/core/src/settings.rs` の `DEFAULT_CONTACT_PATH`（設定値 `advanced.contactPath` でも変更可） |
+| Q-026 | Publisher 名（証明書の CN） | `CN=choko1229` | `installer/signing.json` の `publisher`（1 か所） |
+| Q-027 | 403 の案内先（お問い合わせページ）の URL | `https://clipshare.link/contact` | `crates/core/src/settings.rs` の `DEFAULT_CONTACT_PATH`（`/contact`。設定値 `advanced.contactPath` でも変更可） |
 
 それ以外の項目は確認済み、またはクローズ。
 
@@ -82,7 +84,7 @@
 - 採用した暫定案: 自己署名を前提に、証明書の作成スクリプト・セットアップの「署名について（暫定）」画面・`.cer` の信頼手順を用意した。証明書の作成・署名・信頼ストアへの登録は実行していない。
 - 影響範囲: `installer/`、`crates/app/src/setup.rs`、`.github/workflows/release.yml`。
 - 人に確認したいこと: 正式な署名（コード署名証明書／Azure Trusted Signing など）にするか。Publisher 名（`CN=...`）。
-- 状態: **確認済み（2026-11-21、オーナー回答: まず自己署名で公開する）**。Publisher 名は Q-026 で決定待ち。
+- 状態: **確認済み（2026-11-21、オーナー回答: まず自己署名で公開する）**。Publisher は `CN=choko1229`（Q-026）。
 
 ## Q-007 (2026-11-21) MSIX のファイル書き込み仮想化を無効にする
 - 状況: 右クリック拡張はエクスプローラー（パッケージ外）で動くため、パッケージ内のアプリが `%LOCALAPPDATA%` に書いた設定（右クリックメニューの表示可否・既定の画質）を読めるよう、同じ実体のフォルダを使う必要がある。
@@ -176,6 +178,7 @@
 - 採用した暫定案: 現状のまま（Clipshare 側の `client/latest` の改ざんが前提の攻撃）。署名方針（Q-006）が決まったら、署名者の拇印または Publisher を固定して照合し、パッケージ内の Identity（Version > 現在、Publisher = 自分）も確認する。
 - 影響範囲: `crates/app/src/packaging.rs`、`crates/app/src/updater.rs`。
 - 状態: クローズ（2026-11-21）。暫定案のまま実装済みで、オーナーからの変更指示は無い。変更が必要になれば再オープンする。
+- 補足（2026-11-21）: 配布側の対策として、Clipshare は GitHub の digest と SHA256SUMS が一致しないリリースを配布しない（オーナー回答。Clipshare 側の決定）。リリースワークフローも添付後に同じ照合を行う（Q-028）。署名者の固定は残課題のまま。
 
 ## Q-022 (2026-11-21) 初回セットアップ前の右クリック共有
 - 状況: 右クリック共有は利用者の明示的な操作だが、初回セットアップ（説明と同意）を終える前に送ってよいかは仕様に無い。
@@ -197,7 +200,7 @@
   - 上限情報の取得が成功したら（解除されたら）自動で戻る。ログアウトすると解除扱い（利用者が明示的に匿名で使う場合）
 - 影響範囲: `crates/core/src/engine.rs`、`crates/core/src/state.rs`、`crates/app/src/toast.rs`、`crates/app/src/ui/{history,settings,wizard}.rs`。
 - 人に確認したいこと: 文言と、案内先のページ（連携アプリのページでよいか）。
-- 状態: **確認済み（2026-11-21、オーナー回答: お問い合わせページへ案内する。再認証は促さない）**。案内先 URL は Q-027 で確定待ち。
+- 状態: **確認済み（2026-11-21、オーナー回答: お問い合わせページへ案内する。再認証は促さない）**。案内先は `https://clipshare.link/contact`（Q-027）。
 
 ## Q-025 (2026-11-21) client/latest の sha256 が null のときの更新
 - 状況: 契約 v1.1 で `assets[].sha256` は null になりうる（GitHub が digest を返さない場合）。
@@ -208,12 +211,26 @@
 
 ## Q-026 (2026-11-21) Publisher 名（証明書の Subject / CN）
 - 状況: 自己署名で公開する（Q-006）。MSIX の Publisher と証明書の Subject は完全に一致させる必要がある。
-- 暫定値: `CN=Clipshare Quick`。`installer/signing.json` の `publisher` に 1 か所だけ置き、`build-msix.ps1`・`new-dev-certificate.ps1`・`release.yml`（`.pfx` の Subject と一致するかを確認）がここを読む。
+- 決定値: `CN=choko1229`（以前の仮値は `CN=Clipshare Quick`）。`installer/signing.json` の `publisher` に 1 か所だけ置き、`build-msix.ps1`・`new-dev-certificate.ps1`・`release.yml`（`.pfx` の Subject と一致するかを確認）がここを読む。
 - 影響範囲: `installer/`、`.github/workflows/release.yml`。証明書を作る前に決める必要がある（後で変えると別アプリ扱いになり、更新が引き継がれない）。
-- 状態: **要決定（オーナー）**
+- 確認: `release.yml` の照合（`.pfx` の Subject と `publisher` の完全一致。大文字小文字も区別）が `CN=choko1229` で通ることを、メモリ上だけで作った一時的な自己署名証明書で確認した（証明書ストアには入れていない）。
+- 状態: **確認済み（2026-11-21、オーナー回答: `CN=choko1229`）**
 
 ## Q-027 (2026-11-21) 403 の案内先（お問い合わせページ）の URL
 - 状況: 403（BAN など）ではお問い合わせページへ案内する（Q-024）。Clipshare 側の確定値（`clipeshare` の PROGRESS.md / API_CONTRACT.md の「403案内先URL」）は、2026-11-21 時点で公開ブランチ（`feature/quickshare-api-v1`・`main`）に見当たらない。
-- 暫定値: `{APIベースURL}/contact`（`DEFAULT_CONTACT_PATH`。設定ファイルの `advanced.contactPath` で変更可。同じホストのパスのみ許可）。
+- 決定値: `https://clipshare.link/contact`（既定の API ベース URL + `DEFAULT_CONTACT_PATH` の `/contact`。設定ファイルの `advanced.contactPath` で変更可。同じホストのパスのみ許可）。テスト `actions::tests::default_contact_url_is_clipshare_contact_page`。
 - 影響範囲: 通知・履歴パネル・設定・初回セットアップの「お問い合わせ」ボタン。
-- 状態: **要確認（オーナー / Clipshare 側から確定値が届いたら差し替える）**
+- 状態: **確認済み（2026-11-21、オーナー回答: `https://clipshare.link/contact`）**
+
+## Q-028 (2026-11-21) リリースの SHA256SUMS の形式
+- 状況: Clipshare 側は契約 v1.2 で、リリースの SHA256SUMS と GitHub の digest が一致するリリースだけを配布する（exe と MSIX の両方がそろった版のみ。そろわなければ前の版のまま、何も無ければ 503）。ダウンロードページはセットアップ exe が主、MSIX は従（オーナー回答。Clipshare 側の決定）。SHA256SUMS の形式は v1.2 に書かれるが、2026-11-21 時点で `clipeshare` の公開ブランチ（`main` は該当ファイルなし、`feature/quickshare-api-v1` は v1.1 のまま）から参照できない。
+- 採用した形式（オーナー指示の代替案）: sha256sum 互換。
+  - 1 行 1 ファイル `<小文字の 64 桁 hex><空白 2 つ><ファイル名>`。UTF-8（BOM なし）、改行は LF、最終行も LF で終える
+  - 対象はセットアップ exe と MSIX の 2 ファイルだけ、この順（`ClipshareQuick-Setup-X.Y.Z.exe`、`ClipshareQuick-X.Y.Z.msix`）。`.appinstaller` など他のファイルは含めない
+  - ファイル名は添付ファイル名と完全に一致させる（大文字小文字も区別）
+- 実装: `installer/release-checksums.ps1`（作成・検証）、`installer/test-release-checksums.ps1`（自動テスト 20 件。CI とリリースで実行）、`.github/workflows/release.yml`。
+  - 下書きの Release に 3 ファイル（exe・MSIX・SHA256SUMS）を添付した後、下書きから実ファイルを取り直して、ファイルの集合（欠落・余分）、SHA256SUMS の形式と各行の SHA-256、GitHub の `digest`（3 ファイルとも必須）、ビルドした SHA256SUMS とのバイト一致を確認する
+  - どれか 1 つでも合わなければワークフローを失敗させ、この実行で作った下書きを削除する（公開できる状態を残さない）。同じタグの Release が既にあれば開始しない
+- 影響範囲: `installer/`、`.github/workflows/release.yml`、`installer/README.md` §4、`MANUAL_TESTS.md` §9.3。
+- 人に確認したいこと: Clipshare 側の契約 v1.2 がマージされたら、形式（区切りの空白の数、改行、順序、対象ファイル）が一致するかを照合する。違う場合は `release-checksums.ps1` の 1 か所を直す。
+- 状態: **暫定（Clipshare 側の契約 v1.2 のマージ後に照合）**

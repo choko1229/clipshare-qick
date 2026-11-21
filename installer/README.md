@@ -11,11 +11,14 @@
 | `build-msix.ps1` | release ビルドの成果物から `.msix` を作り、必要なら署名し、SHA-256 を出す |
 | `new-dev-certificate.ps1` | 自己署名のコード署名証明書を作る（秘密鍵はリポジトリの外へ出力） |
 | `signing.json` | Publisher（証明書の Subject）を 1 か所で管理する。値は `CN=choko1229`（QUESTIONS Q-026、確認済み） |
+| `release-checksums.ps1` | リリースの `SHA256SUMS` を作る・添付ファイルと照合する（QUESTIONS Q-028） |
+| `test-release-checksums.ps1` | `release-checksums.ps1` の自動テスト（CI とリリースで実行） |
 
 配布物（GitHub Releases に添付するもの）:
 
 - `ClipshareQuick-x.y.z.msix`（署名済み）
 - `ClipshareQuick-Setup-x.y.z.exe`（画面 02・03 のセットアップ。同じフォルダの `.msix` をインストールする）
+- `SHA256SUMS`（上の 2 ファイルの SHA-256。sha256sum 互換 `<64桁hex>  <ファイル名>`、LF。他のファイルは含めない。Clipshare はこれと GitHub の digest が一致する版だけを配布する）
 （2 ファイル。Q-008 確定）。自己署名の公開証明書（公開鍵のみ）はセットアップに埋め込む（ビルド時に環境変数 `CQ_SIGNING_CER` で指定。`crates/app/build.rs`）。
 埋め込みが無い開発ビルドでは、セットアップと同じフォルダの `.cer` を使う。
 
@@ -72,7 +75,11 @@ Get-ChildItem Cert:\LocalMachine\TrustedPeople | Where-Object Subject -eq "CN=ch
    git tag v0.1.0
    git push origin v0.1.0
    ```
-4. Actions の完了後、Releases の下書きを開き、`sha256` を確認して公開する。
+4. Actions の完了後、Releases の下書きを開いて確認し、公開する。
+   - ワークフローは 3 ファイル（exe・MSIX・`SHA256SUMS`）を添付した後、下書きから取り直して `SHA256SUMS` と GitHub の digest に照合する。
+     欠落・余分・不一致があれば失敗し、下書きを削除する（ログの「添付した実ファイルを SHA256SUMS・digest と照合」に理由が出る）。
+   - **下書きの添付ファイルを手で差し替え・追加しない**（`.appinstaller` なども足さない）。差し替える場合は下書きを削除し、タグのワークフローを再実行する。
+   - 同じタグの Release（下書きを含む）が残っていると開始しない。再実行の前に削除する。
 5. Clipshare 側の `client/latest`（GitHub Releases から取得・キャッシュ）が新しい版を返すことを確認する。
 
 ## 更新の仕組み（アプリ側）
