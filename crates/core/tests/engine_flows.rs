@@ -900,6 +900,15 @@ async fn v11_forbidden_blocks_uploads_without_falling_back_to_anonymous() {
         .await;
     let s = h.wait_for("利用停止", |s| s.blocked).await;
     assert_eq!(s.tray, cq_core::engine::TrayState::Error);
+    // 403 の失敗は再試行させない
+    let failed = s
+        .history
+        .iter()
+        .find(|e| e.file_name == "banned1.png")
+        .unwrap();
+    assert_eq!(failed.failure.as_ref().unwrap().code, "FORBIDDEN");
+    assert!(!failed.failure.as_ref().unwrap().retryable);
+    assert!(h.engine.retry(&failed.id).is_err());
     // 再ログインを求めない（BAN は再認可で解決しない）
     assert!(matches!(s.account, AccountView::LoggedIn { .. }));
     h.photo("banned2.png", 8, 8);

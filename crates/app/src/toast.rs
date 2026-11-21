@@ -39,6 +39,7 @@ pub enum ToastAction {
     Resume,
     Update,
     ManagePage,
+    Contact,
     Dismiss,
 }
 
@@ -52,6 +53,7 @@ impl ToastAction {
             Self::Resume => "resume".into(),
             Self::Update => "update".into(),
             Self::ManagePage => "manage".into(),
+            Self::Contact => "contact".into(),
             Self::Dismiss => "dismiss".into(),
         }
     }
@@ -63,6 +65,7 @@ impl ToastAction {
             "resume" => Self::Resume,
             "update" => Self::Update,
             "manage" => Self::ManagePage,
+            "contact" => Self::Contact,
             "dismiss" => Self::Dismiss,
             _ => {
                 if let Some(u) = s.strip_prefix("open:") {
@@ -83,6 +86,7 @@ impl ToastAction {
             Self::Resume => Command::SetAutoUpload(true),
             Self::Update => Command::Open(Screen::Update),
             Self::ManagePage => Command::OpenManagePage,
+            Self::Contact => Command::OpenContactPage,
             Self::Dismiss => return None,
         })
     }
@@ -402,16 +406,18 @@ pub fn spec_for(ev: &EngineEvent) -> Option<ToastSpec> {
                 )
             }
         }
-        // 403（BAN など）は再ログインでは解決しないため、アカウントの確認を案内する（契約 v1.1）。
-        EngineEvent::AccountBlocked => spec(
-            "このアカウントでは利用できません".into(),
-            "Clipshareでアカウントの状態を確認してください。".into(),
-            vec![ToastButton {
-                label: "Webで確認",
-                action: ToastAction::ManagePage,
+        // 403（BAN など）は再認可で解決しないため、お問い合わせページへ案内する（Q-024）。
+        // 再ログイン・再試行は促さない。
+        EngineEvent::AccountBlocked => ToastSpec {
+            title: "このアカウントでは利用できません".into(),
+            body: String::new(),
+            buttons: vec![ToastButton {
+                label: "お問い合わせ",
+                action: ToastAction::Contact,
             }],
-            None,
-        ),
+            tag: Some("blocked"),
+            launch: ToastAction::Contact,
+        },
         EngineEvent::AuthExpired => spec(
             "連携が切れました".into(),
             // デザインの「バナー付き・1日5件で動作します」は確定仕様（匿名へ切り替えない）と矛盾するため置き換えた（QUESTIONS Q-003）。
@@ -534,11 +540,39 @@ mod tests {
             ToastAction::Resume,
             ToastAction::Update,
             ToastAction::ManagePage,
+            ToastAction::Contact,
             ToastAction::Dismiss,
         ] {
             assert_eq!(ToastAction::decode(&a.encode()), Some(a));
         }
         assert_eq!(ToastAction::decode("rm -rf"), None);
+    }
+
+    #[test]
+    fn forbidden_points_to_contact_page_only() {
+        let s = spec_for(&EngineEvent::AccountBlocked).unwrap();
+        assert_eq!(s.title, "このアカウントでは利用できません");
+        assert_eq!(s.launch, ToastAction::Contact);
+        assert_eq!(s.buttons.len(), 1);
+        assert_eq!(s.buttons[0].action, ToastAction::Contact);
+        assert_eq!(
+            ToastAction::Contact.into_command(),
+            Some(Command::OpenContactPage)
+        );
+        // 再ログイン・再試行は促さない
+        assert!(
+            !s.buttons
+                .iter()
+                .any(|b| matches!(b.action, ToastAction::Login))
+        );
+        // 失敗の通知も別に出さない（同じことを二重に知らせない）
+        let failed = EngineEvent::Failed {
+            entry_id: "1".into(),
+            file_name: "a.png".into(),
+            code: "FORBIDDEN".into(),
+            message: "x".into(),
+        };
+        assert!(spec_for(&failed).is_none());
     }
 
     #[test]

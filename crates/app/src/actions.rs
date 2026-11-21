@@ -30,6 +30,12 @@ pub fn manage_url(shared: &Arc<Shared>) -> String {
     join_web(&s, &s.advanced.manage_apps_path)
 }
 
+/// 403（BAN など）の案内先のお問い合わせページ（Q-024・Q-027）。
+pub fn contact_url(shared: &Arc<Shared>) -> String {
+    let s = shared.engine.settings().get();
+    join_web(&s, &s.advanced.contact_path)
+}
+
 /// ダウンロードページ（更新履歴）。
 pub fn download_page_url(shared: &Arc<Shared>) -> String {
     let s = shared.engine.settings().get();

@@ -257,6 +257,7 @@ impl Wizard {
                 action = self.success(ui, p, &name);
             }
             LoginState::Failed { code } => {
+                let forbidden = code == "FORBIDDEN";
                 ui.label(widgets::title("連携できませんでした", p));
                 ui.label(widgets::body(login_failure_text(&code), p));
                 ui.add_space(8.0);
@@ -271,7 +272,12 @@ impl Wizard {
                     p,
                 ));
                 bottom_bar(ui, p, |ui| {
-                    if widgets::primary(ui, p, "もう一度試す").clicked() {
+                    if forbidden {
+                        // 403 は再認可で解決しないため、再試行ではなくお問い合わせへ案内する（Q-024）。
+                        if widgets::primary(ui, p, "お問い合わせ").clicked() {
+                            crate::platform::open_url(&crate::actions::contact_url(shared));
+                        }
+                    } else if widgets::primary(ui, p, "もう一度試す").clicked() {
                         shared.reset_login();
                         shared.start_login();
                     }

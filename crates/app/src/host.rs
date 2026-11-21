@@ -73,6 +73,10 @@ fn handle_common(shared: &Arc<Shared>, cmd: Command) -> Option<Screen> {
             crate::platform::open_url(&url);
             None
         }
+        Command::OpenContactPage => {
+            crate::platform::open_url(&crate::actions::contact_url(shared));
+            None
+        }
         Command::OpenManagePage => {
             crate::platform::open_url(&crate::actions::manage_url(shared));
             None

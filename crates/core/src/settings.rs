@@ -140,9 +140,16 @@ pub struct AdvancedSettings {
     pub manage_apps_path: String,
     /// ダウンロードページ（更新履歴）のパス。
     pub download_page_path: String,
+    /// 403（BAN など）のときに案内するお問い合わせページのパス（API と同じホスト）。
+    pub contact_path: String,
 }
 
 pub const DEFAULT_API_BASE_URL: &str = "https://clipshare.link";
+
+/// 403 の案内先（お問い合わせページ）の既定パス。
+/// **暫定値**: Clipshare 側の確定値（PROGRESS.md / API_CONTRACT.md の「403案内先URL」）が届いたら差し替える
+/// （QUESTIONS Q-027「要確認」）。設定の `advanced.contactPath` でも変更できる。
+pub const DEFAULT_CONTACT_PATH: &str = "/contact";
 
 impl Default for AdvancedSettings {
     fn default() -> Self {
@@ -160,6 +167,7 @@ impl Default for AdvancedSettings {
             auth_timeout_secs: 300,
             manage_apps_path: "/settings/apps".to_owned(),
             download_page_path: "/qick/download".to_owned(),
+            contact_path: DEFAULT_CONTACT_PATH.to_owned(),
         }
     }
 }
@@ -295,6 +303,7 @@ impl Settings {
         for (name, path) in [
             ("manageAppsPath", &a.manage_apps_path),
             ("downloadPagePath", &a.download_page_path),
+            ("contactPath", &a.contact_path),
         ] {
             let ok = path.starts_with('/')
                 && !path.starts_with("//")

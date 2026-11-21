@@ -64,6 +64,8 @@ pub enum Command {
     DeleteEntry(String),
     /// Web の「連携アプリ」ページを開く。
     OpenManagePage,
+    /// お問い合わせページを開く（403 の案内）。
+    OpenContactPage,
     Quit,
 }
 
