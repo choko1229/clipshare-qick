@@ -1083,3 +1083,67 @@ async fn v11_mock_rejects_nameless_part_and_mismatched_type() {
         .unwrap();
     assert_eq!(r.status().as_u16(), 415);
 }
+
+// ---- 契約 v1.2: client/latest の sha256 ----
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v12_update_sha256_present_null_and_mismatch() {
+    use cq_core::update::{UpdateDecision, decide, verify_download};
+    use sha2::Digest;
+    let _slot = slot().await;
+    let mock = MockServer::start(MockConfig::default()).await.unwrap();
+    let h = Harness::new(&mock.base_url(), |_| {}).await;
+    let body = b"fake msix bytes".to_vec();
+    let good = cq_core::api::hex(&sha2::Sha256::digest(&body));
+    let url = format!("{}/download/ClipshareQuick-9.0.0.msix", mock.base_url());
+    let latest = |sha: serde_json::Value| {
+        json!({
+            "version": "9.0.0", "publishedAt": "2026-11-21T00:00:00Z", "notes": "n", "minSupportedVersion": null,
+            "assets": [{ "name": "ClipshareQuick-9.0.0.msix", "url": url, "sizeBytes": body.len(), "sha256": sha }]
+        })
+    };
+    let api = h.engine.api();
+    let dir = tempfile::tempdir().unwrap();
+    let cancel = tokio_util::sync::CancellationToken::new();
+
+    // 1) sha256 あり・一致 → 検証に通る
+    mock.configure(|c| {
+        c.latest = Some(latest(json!(good)));
+        c.download_body = body.clone();
+    });
+    let l = api.latest_client().await.unwrap();
+    let UpdateDecision::Available { asset, .. } = decide("0.1.0", &l).unwrap() else {
+        panic!("自動更新の対象になるはず")
+    };
+    let dest = dir.path().join("ok.msix");
+    let sha = api
+        .download_to(&asset.url, &dest, asset.size_bytes + 1024, None, &cancel)
+        .await
+        .unwrap();
+    assert!(verify_download(&asset, &sha, std::fs::metadata(&dest).unwrap().len()).is_ok());
+
+    // 2) sha256 が不一致 → 検証で弾く（適用しない）
+    mock.configure(|c| c.latest = Some(latest(json!("0".repeat(64)))));
+    let l = api.latest_client().await.unwrap();
+    let UpdateDecision::Available { asset, .. } = decide("0.1.0", &l).unwrap() else {
+        panic!()
+    };
+    let dest = dir.path().join("bad.msix");
+    let sha = api
+        .download_to(&asset.url, &dest, asset.size_bytes + 1024, None, &cancel)
+        .await
+        .unwrap();
+    assert!(verify_download(&asset, &sha, std::fs::metadata(&dest).unwrap().len()).is_err());
+
+    // 3) sha256 が null → 自動インストールせず、ダウンロードページへ案内
+    mock.configure(|c| c.latest = Some(latest(serde_json::Value::Null)));
+    let l = api.latest_client().await.unwrap();
+    assert!(matches!(
+        decide("0.1.0", &l).unwrap(),
+        UpdateDecision::ManualOnly { .. }
+    ));
+
+    // 未取得時は 503
+    mock.configure(|c| c.latest = None);
+    assert!(api.latest_client().await.is_err());
+}
