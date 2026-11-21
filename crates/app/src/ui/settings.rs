@@ -313,13 +313,18 @@ impl SettingsWindow {
                     }
                 });
                 ui.add_space(8.0);
-                if widgets::primary(ui, p, "ログインして連携").clicked() {
-                    shared.start_login();
+                // 403（BAN など）のときは再認証を促さない（Q-024）。
+                let forbidden = snap.blocked
+                    || matches!(&login, LoginState::Failed { code } if code == "FORBIDDEN");
+                if !forbidden {
+                    if widgets::primary(ui, p, "ログインして連携").clicked() {
+                        shared.start_login();
+                    }
+                    ui.label(widgets::muted(
+                        "ブラウザが開きます。許可するとこのアプリでアップロードできるようになります。",
+                        p,
+                    ));
                 }
-                ui.label(widgets::muted(
-                    "ブラウザが開きます。許可するとこのアプリでアップロードできるようになります。",
-                    p,
-                ));
             }
         }
         Action::None

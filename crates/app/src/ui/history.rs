@@ -170,7 +170,8 @@ fn anonymous_notice(ui: &mut Ui, p: &Palette, snap: &Snapshot) -> Option<Action>
             "画像にバナーが付きます。ログインすると制限が外れます。",
             p,
         ));
-        if widgets::small(ui, p, "ログインして制限を解除").clicked() {
+        // 403（BAN など）のときは再認証を促さない（Q-024）。
+        if !snap.blocked && widgets::small(ui, p, "ログインして制限を解除").clicked() {
             action = Some(Action::Open(Screen::Settings(SettingsTab::Account)));
         }
     });

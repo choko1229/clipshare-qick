@@ -233,7 +233,8 @@ impl SetupApp {
         };
         let opts = self.opts;
         let state = Arc::clone(&self.state);
-        let trust_requested = self.trust && !self.signed_ok;
+        // 再試行に備え、その時点で署名がまだ信頼されていない場合だけ信頼の手順を行う。
+        let trust_requested = self.trust && crate::packaging::verify_signature(&pkg).is_err();
         let trust_cert = self.cert.clone();
         std::thread::spawn(move || {
             let set = |p: Page| {
@@ -253,8 +254,13 @@ impl SetupApp {
                 }
                 (true, Some(cer)) => {
                     if let Err(code) = crate::packaging::trust_certificate(&cer) {
+                        // 失敗時は「再試行」で使うため残す。
                         set(Page::Failed { step: 0, code });
                         return;
+                    }
+                    // 埋め込みから書き出した一時ファイルは、信頼に使い終わったら消す（公開鍵のみだが残さない）。
+                    if cer.starts_with(std::env::temp_dir()) {
+                        let _ = std::fs::remove_file(&cer);
                     }
                 }
                 (false, _) => {}
