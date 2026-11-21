@@ -17,9 +17,9 @@ use crate::fsutil;
 #[serde(rename_all = "lowercase")]
 pub enum Quality {
     /// 原寸（高画質WebPで再エンコード、埋め込み情報は除去）。
-    #[default]
     Original,
-    /// 縮小（長辺2000px WebP）。
+    /// 縮小（長辺2000px WebP）。既定（Q-011 確定: 2026-11-21）。
+    #[default]
     Shrink,
 }
 
@@ -195,7 +195,9 @@ impl Default for Settings {
             auto_upload_consented: false,
             auto_upload: true,
             copy_url_after_upload: true,
-            default_quality: Quality::Original,
+            // 既定は「縮小（長辺2000px）」（Q-011）。保存済みの設定には必ずこの項目が書かれるため、
+            // 既存の利用者の選択は変わらない（マイグレーション不要）。
+            default_quality: Quality::Shrink,
             watch_folders: Vec::new(),
             watch_videos: false,
             launch_at_startup: true,
@@ -495,12 +497,12 @@ mod tests {
         let store = SettingsStore::load(&p);
         let mut rx = store.subscribe();
         store
-            .update(|s| s.default_quality = Quality::Shrink)
+            .update(|s| s.default_quality = Quality::Original)
             .unwrap();
         assert!(rx.has_changed().unwrap());
-        assert_eq!(rx.borrow_and_update().default_quality, Quality::Shrink);
+        assert_eq!(rx.borrow_and_update().default_quality, Quality::Original);
         let reloaded = SettingsStore::load(&p);
-        assert_eq!(reloaded.get().default_quality, Quality::Shrink);
+        assert_eq!(reloaded.get().default_quality, Quality::Original);
     }
 
     #[test]
@@ -524,6 +526,28 @@ mod tests {
         assert!(s.validate().is_err());
         s.advanced.manage_apps_path = "/settings/apps".into();
         assert!(s.validate().is_ok());
+    }
+
+    #[test]
+    fn default_quality_is_shrink_but_saved_choice_is_kept() {
+        assert_eq!(Settings::default().default_quality, Quality::Shrink);
+        // 既存の利用者が保存した「原寸」はそのまま
+        let s: Settings = serde_json::from_str(r#"{"defaultQuality":"original"}"#).unwrap();
+        assert_eq!(s.default_quality, Quality::Original);
+        // 項目が無い（初回・手書き）場合は既定の縮小
+        let s: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.default_quality, Quality::Shrink);
+        // 保存すると必ず書き出される（次回読み込み時に既定値の変更の影響を受けない）
+        let json = serde_json::to_string(&Settings::default()).unwrap();
+        assert!(json.contains("\"defaultQuality\":\"shrink\""));
+        // 破損からの復旧も既定の縮小
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("settings.json");
+        std::fs::write(&p, b"broken").unwrap();
+        assert_eq!(
+            SettingsStore::load(&p).get().default_quality,
+            Quality::Shrink
+        );
     }
 
     #[test]

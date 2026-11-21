@@ -88,7 +88,7 @@ fn default_quality() -> ShareQuality {
     local_data_dir()
         .and_then(|d| std::fs::read_to_string(d.join("settings.json")).ok())
         .map(|s| menu::default_quality_from_settings(&s))
-        .unwrap_or(ShareQuality::Original)
+        .unwrap_or(ShareQuality::Shrink)
 }
 
 /// 本体アプリの実行ファイル（実行エイリアス → DLL と同じフォルダ）。

@@ -259,7 +259,8 @@ async fn auto_upload_copies_url_and_records_history() {
     assert!(e.delete_token.is_some());
     let reqs = mock.requests_to(Endpoint::Quick);
     assert_eq!(reqs.len(), 1);
-    assert_eq!(reqs[0].quality.as_deref(), Some("original"));
+    // 既定の画質は「縮小」（Q-011）
+    assert_eq!(reqs[0].quality.as_deref(), Some("shrink"));
     assert!(!reqs[0].authorized);
     assert!(reqs[0].user_agent.starts_with("ClipshareQuick/"));
     assert!(reqs[0].user_agent.ends_with("(Windows)"));

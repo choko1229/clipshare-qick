@@ -88,15 +88,15 @@ pub fn sub_title(q: ShareQuality, default: ShareQuality) -> String {
     }
 }
 
-/// アプリの設定（settings.json）から既定の画質を読む。読めなければ原寸。
+/// アプリの設定（settings.json）から既定の画質を読む。読めなければアプリと同じ既定（縮小、Q-011）。
 pub fn default_quality_from_settings(json: &str) -> ShareQuality {
     let v: serde_json::Value = match serde_json::from_str(json) {
         Ok(v) => v,
-        Err(_) => return ShareQuality::Original,
+        Err(_) => return ShareQuality::Shrink,
     };
     match v.get("defaultQuality").and_then(|q| q.as_str()) {
-        Some("shrink") => ShareQuality::Shrink,
-        _ => ShareQuality::Original,
+        Some("original") => ShareQuality::Original,
+        _ => ShareQuality::Shrink,
     }
 }
 
@@ -118,13 +118,14 @@ mod tests {
         let video = classify(&p(&["clip_0412.mp4"]));
         assert_eq!(root_title(&video), "Clipshareで共有");
         assert!(!has_submenu(&video));
+        // 既定は縮小（Q-011）。「（既定）」は縮小側に付く
         assert_eq!(
-            sub_title(ShareQuality::Original, ShareQuality::Original),
-            "原寸で共有（既定）"
+            sub_title(ShareQuality::Shrink, ShareQuality::Shrink),
+            "縮小して共有（既定）"
         );
         assert_eq!(
-            sub_title(ShareQuality::Shrink, ShareQuality::Original),
-            "縮小して共有"
+            sub_title(ShareQuality::Original, ShareQuality::Shrink),
+            "原寸で共有"
         );
     }
 
@@ -151,7 +152,8 @@ mod tests {
         );
         assert_eq!(
             default_quality_from_settings("broken"),
-            ShareQuality::Original
+            ShareQuality::Shrink
         );
+        assert_eq!(default_quality_from_settings("{}"), ShareQuality::Shrink);
     }
 }
