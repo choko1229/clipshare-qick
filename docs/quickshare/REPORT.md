@@ -211,3 +211,31 @@ QUESTIONS.md の Q-001〜Q-025（Q-004・Q-014・Q-015 は確認済み、ほか�
 5. Actions の「Release」の成功を確認し、下書きの添付ファイルが 3 つ（exe・MSIX・SHA256SUMS）であることを確認して公開する（MANUAL_TESTS §9.3）。
 6. 実機確認（MANUAL_TESTS 全体。特に §9.1 自己署名の導線、§9.3 SHA256SUMS、右クリック、SteamVR、VRChat 実撮影）。
 7. Clipshare 側の契約 v1.2 がマージされたら、`API_CONTRACT.md` を差し替えて SHA256SUMS の形式を照合する（Q-028）。
+
+## 11. 更新版デザインへの追従（2026-11-22）
+
+### 11.1 進め方
+1. 更新版 11 枚（06, 08, 09, 10, 11, 12, 14, 16, 21, 23, 24）の HTML から文言・ボタン・トグル（`aria-checked`）・選択状態を取り出し、前の版との差分と実装を突き合わせて `DESIGN_DIFF.md` を作った（コード変更の前にコミット）。
+2. デザインのとおりにすると既存の決定や仕様とぶつかる 3 点（Q-029 設定アカウントの 403 でログアウトが消える、Q-030 履歴パネルの 403 で一覧が消える、Q-032 エクスプローラーのメニューにバッジが描けない）は実装せずに質問した。仮置き文言（「GitHubを開く」「開く」、未完了通知の本文）はそのまま採用し、文言の提案は Q-033。
+3. 未実装分を実装した（`DESIGN_DIFF.md` の「対応結果」）。既存の決定（Publisher、2 ファイル配布、アプリ内アンインストール、既定は縮小、削除用トークンは履歴ファイル、403 はお問い合わせ、503 は発行停止の表示）は変えていない。
+
+### 11.2 変更ファイル
+- core: `engine.rs`（`TrayState::Blocked`・`TrayState::resolve`・`TrayFacts`、`Snapshot::auto_upload` を実際の状態に、`auto_upload_setting` を追加）、`update.rs`（`ManualOnly` に容量）、`settings.rs`（既定値のテスト）、`tests/engine_flows.rs`
+- app: `ui/settings.rs`（一般・情報・通知の一覧化、403 のトグル、ログアウトの通知）、`ui/update.rs`（⑮⑯）、`ui/history.rs`、`ui/wizard.rs`（`failure_action`）、`ui/widgets.rs`（`small_danger`）、`toast.rs`、`updater.rs`、`tray.rs`、`vr_bridge.rs`、`actions.rs`（`toggle_auto_upload`・`SOURCE_URL`）、`app.rs`
+- docs: `DESIGN_DIFF.md`（新規）、`QUESTIONS.md`（Q-029〜Q-033）、`MANUAL_TESTS.md` §11、`PROGRESS.md` Step 7、`CHANGELOG.md`、`design/`（更新版の取り込み）、`design/README.md`
+
+### 11.3 セルフレビュー
+1. **1 回目（デザインとの一致）**: 抽出したテキストと `aria-checked` を画面ごとに照合。12 の「更新を自動で確認」はバッジがトグルの左（右から並べるレイアウトで順序を合わせた）。23 も区切り線の一覧に揃えた。
+2. **2 回目（状態の整合・エラー処理）**: 403 で自動アップロードを「OFF 表示」にしたところ、トレイのメニュー・VR パネルの切り替えが「設定値を反転」していたため、表示が OFF のまま裏で設定を OFF にしてしまう経路を発見 → 切り替えの判定を `actions::next_auto_upload` に集約し、403 の間は何もしない（トレイの項目も無効化）。設定の保存失敗・クリップボードの失敗は警告ログに残す（値は出さない）。
+3. **3 回目（セキュリティ・ログ・型）**: 追加した通知・ログにトークン・URL のクエリ・ファイル内容は含まれない。ソースコードの URL は定数（`https` のみを開く `open_url` を通る）。`TrayState` の追加で網羅性チェック（`match`）がトレイのアイコン・履歴のバッジの更新漏れを検出した。`unwrap`/`expect` は本番経路に追加していない。
+
+### 11.4 テスト結果（GNU ツールチェーン 1.100.0、ローカル）
+`cargo fmt --all -- --check` 通過、`cargo clippy --workspace --all-targets --locked -- -D warnings` 通過、`cargo test --workspace --locked` **138 件成功**（追加 9 件）、`cargo build --workspace --release --locked` 成功、`installer/test-release-checksums.ps1` 20 件成功。push はしていない（ローカルのコミットのみ）。
+
+### 11.5 未解決の質問
+- Q-028 SHA256SUMS の形式（Clipshare 側の契約 v1.2 のマージ待ち）
+- Q-029 設定アカウントの 403 でアカウント欄・ログアウトを消すか（現状は残す）
+- Q-030 履歴パネルの 403 で一覧を消すか（現状は残す）
+- Q-031 403 の間のトグル表示（暫定案で実装。変更があれば指示がほしい）
+- Q-032 右クリックの「既定」バッジ・補足（プラットフォームの制約で「（既定）」のまま）
+- Q-033 「連携の解除が未完了」の本文（デザインの文言を採用。理由を限定しない文言を提案）

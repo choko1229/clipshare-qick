@@ -91,7 +91,7 @@
 | 要素 | デザイン | 実装（変更前） | 判定 |
 |---|---|---|---|
 | 「Windowsの通知」「VR内の通知」 | トグル、どちらも ON、説明文なし | 同じ（既定 ON） | 実装済み（反映のテストが無い → 判定を関数にしてテストを追加） |
-| 並び | 区切り線つきの一覧 | カードの中に 2 行 | 実装済み（見た目の差は他の設定タブと同じ扱い） |
+| 並び | 区切り線つきの一覧 | カードの中に 2 行 | **未実装**（区切り線の一覧にする） |
 
 ## 24 設定: 情報
 
@@ -103,3 +103,17 @@
 ## SPEC §8 との照合
 
 §8 の各行（動画の自動アップロード、通知タブ、右クリックメニュー・SteamVR トグル、更新を確認、アンインストール、情報タブ、通知 3 種、最新です、手動の更新、403 の案内、403/503 の説明）はすべて上の表のどれかに対応し、矛盾は無い。
+
+## 対応結果（2026-11-22）
+
+「未実装」はすべて実装した。「仕様と矛盾」は実装を変えず、QUESTIONS に記録した。
+
+| 画面 | 対応 | 主な変更箇所 | テスト |
+|---|---|---|---|
+| 06 | 失敗時の主ボタンの判定を関数にした（403 → お問い合わせ、それ以外 → もう一度試す） | `ui/wizard.rs`（`failure_action`） | `forbidden_failure_points_to_contact`、`unavailable_failure_can_retry`、`timeout_failure_can_retry` |
+| 09 | 403 のヘッダーを「利用不可」に（`TrayState::Blocked`）。自動アップロードは実際の状態（OFF）を表示し、操作できない。トレイのメニュー・VR パネルからも 403 の間は切り替えない | `core/engine.rs`（`TrayState::resolve`、`Snapshot::auto_upload`）、`ui/history.rs`、`ui/settings.rs`（アップロード）、`tray.rs`、`vr_bridge.rs`、`actions.rs` | `tray_state_priority`、`toggle_is_ignored_while_blocked`、結合テスト `v11_forbidden_blocks_uploads_without_falling_back_to_anonymous`（表示・解除後の復帰） |
+| 12 | 「一般」を 1 つの一覧に（デザインの並び、見出しつきの「更新を確認」、赤枠の「アンインストール」、版のバッジ） | `ui/settings.rs`（`general`）、`ui/widgets.rs`（`small_danger`） | 既定値 `toggle_defaults_follow_design` |
+| 16 | 「新しいバージョン」（本文なし＋「開く」）、「連携の解除が未完了」（デザインの本文＋「連携アプリを開く」） | `toast.rs`（`new_version_spec`、`unlink_incomplete_spec`）、`updater.rs`、`ui/settings.rs`（ログアウト） | `added_toasts_follow_design` |
+| 21 | ⑮「最新です」の見出し・版・自動確認のトグル。⑯ 手動の更新に容量と自動確認のトグル（`ManualOnly` に容量を追加） | `ui/update.rs`、`core/update.rs`、`app.rs`、`updater.rs` | `missing_sha256_is_manual_only_and_never_verified`（容量） |
+| 23 | 区切り線の一覧に。トグルの反映を関数にした | `ui/settings.rs`、`toast.rs`（`windows_toast_enabled`）、`vr_bridge.rs`（`vr_hud_enabled`） | `windows_toast_toggle_is_respected`、`vr_hud_toggle_is_respected` |
+| 24 | 4 行の一覧（バッジ「v[VERSION]」「MIT」、「GitHubを開く」「開く」） | `ui/settings.rs`（`about`）、`actions.rs`（`SOURCE_URL`） | — |
