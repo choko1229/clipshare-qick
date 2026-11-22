@@ -287,3 +287,7 @@ ew-dev-certificate.ps1 -OutDir C:\secure` → `C:\secure\ClipshareQuick-dev.pfx`
 4. Actions の「Release」の完了後、下書きに exe・MSIX・SHA256SUMS の 3 ファイルだけがあること、本文が CHANGELOG の `[0.1.0]` であることを確認して公開。
 5. Clipshare の管理画面（管理 › 連携トークン › Clipshare Quick 連携の設定）に証明書の **SHA-256**（Windows の「拇印」SHA-1 ではない）を入力。例: `(Get-FileHash C:\secure\ClipshareQuick.cer -Algorithm SHA256).Hash`（`.cer` は DER のため証明書の SHA-256 と同じ。手順の正本は clipeshare の DEPLOY §5）。
 6. `MANUAL_TESTS.md` の実機確認（特に §11）。
+
+### 12.6 証明書のファイル名の確認
+- `new-dev-certificate.ps1` の出力は `<OutDir>\ClipshareQuick-dev.pfx`（秘密鍵つき）と `<OutDir>\ClipshareQuick.cer`（公開鍵のみ）。`installer/README.md`（§1・§2・§3・§4）と本書 §12.5 の名前は一致していた。
+- `installer/build-msix.ps1` の使用例だけが `C:\secure\dev.pfx` だったため、`C:\secure\ClipshareQuick-dev.pfx` に直した（コメントのみ）。ワークフロー内の `sign.pfx`・`signing.cer` は実行時の一時ファイル名で、オーナーの手順には出ない。
