@@ -246,3 +246,48 @@ QUESTIONS.md の Q-001〜Q-025（Q-004・Q-014・Q-015 は確認済み、ほか�
 - Q-033: 通知の本文を「連携の解除を完了できませんでした。連携アプリで状態を確認してください。」に変更（実装・テスト・`design/16`・依頼 16）。画面 22 の帯も同じ文言に変更（2026-11-22 追加指示。通知と同じ定数を使う。テスト `unlink_notice_uses_confirmed_text`、`design/22`）。
 - Q-028: Clipshare 側の契約 v1.2 のマージ後に突き合わせる（未完了）。
 - テスト: `cargo fmt --all -- --check` 通過、`cargo clippy --workspace --all-targets --locked -- -D warnings` 通過、`cargo test --workspace --locked` **139 件成功**、`installer/test-release-checksums.ps1` 20 件成功。コミットはローカルのみ。
+
+## 12. リリース準備（0.1.0、2026-11-22）
+
+Clipshare 側の本番反映（clipeshare の PR #1〜#4）の完了を受けて実施。範囲は push・CI・Q-028・PR #1 のマージ・バージョン確定まで。タグ・Release の作成と公開・証明書・Secrets・ブランチ削除は行っていない。
+
+### 12.1 事前確認
+- `git status` clean。履歴（`git log -p origin/main..HEAD`）に .pfx・秘密鍵・パスワード・トークンの実値なし（ファイル名・内容のパターンで確認。見つかったのはテスト用の値と `secret.rs` の型だけ）。`git diff origin/main...HEAD --stat` は 115 ファイル、追加のみ。
+- fmt 通過、clippy 通過、`cargo test --workspace --locked` 140 件成功、`test-release-checksums.ps1` 20 件成功、`cargo build --release --locked` 成功。
+- main（`e71ad8f`）を fetch。`git merge-tree` で競合なし。
+- `release.yml` の起点は `on: push: tags: ["v*"]` のみ（branches・workflow_dispatch なし）。main へのマージ後も CI だけが動き、Release は作られないことを実際に確認（タグ 0・Release 0）。
+
+### 12.2 Q-028（SHA256SUMS の形式）
+- clipeshare main（`f1623c3`）の `API_CONTRACT.md` v1.2 と `lib/quick-client/checksums.ts`・`releases.ts` を `gh api` で取得して照合。矛盾なし（詳細は QUESTIONS Q-028）。
+- `release-checksums.ps1 -Mode Write` の出力を、取得した `parseSha256Sums` に Node 24 で通して `ok: true`、値は GNU `sha256sum` とも一致。
+- 契約の例の exe 名（`ClipshareQuickSetup-…`）はこちらの `ClipshareQuick-Setup-…` と違うが、Clipshare は拡張子だけで配布ファイルを選ぶため問題ない（判断の理由: 名前を変えると build-msix・テスト・手順書に波及し、利点がない）。
+
+### 12.3 push・CI・PR #1
+- `feature/installer` を push（force なし）。PR #1 はベース main、競合なし、ブランチ保護・レビュー必須の設定なし。
+- CI の `cargo audit` が失敗: `url` 2.5.8 の RUSTSEC-2026-0592（2026-11-20 公開）。`cargo update -p url --precise 2.5.9`（`form_urlencoded` 1.2.3 も連動）で解消し、ローカルで audit・clippy・テスト・release build を確認して push。再実行で全チェック成功。
+- PR 本文を最新化（実装範囲、テスト 140 件・20 件、MANUAL_TESTS の参照、実機確認は未実施）。
+- マージ方式: このリポジトリにはマージの前例がない（main は初期コミットのみ）ため、指示どおりマージコミット。`28b4064`。main の CI 成功。ブランチは残した。
+
+### 12.4 バージョン確定（PR #2）
+- `CHANGELOG.md`: `[Unreleased]` → `[0.1.0] - 2026-11-22`、空の `[Unreleased]` を残す。
+- `Cargo.toml` は 0.1.0、`Cargo.lock` の 6 クレートも 0.1.0。MSIX は `build-msix.ps1` が `0.1.0.0` に変換（`AppxManifest.xml` は `{{VERSION}}` のテンプレート）。
+- **見つけた食い違い**: `release.yml` の Release 本文は固定文「CHANGELOG.md を参照」だった。Clipshare の `/qick/download` の更新履歴は Release 本文から作られるため、そのままでは 1 行しか出ない。→ `installer/release-notes.ps1` を追加し、CHANGELOG の該当節を `--notes-file` で渡すようにした。節が無い・未確定・箇条書きが無い・1 項目 140 文字超なら下書きを作る前に失敗する。あわせて、タグと `Cargo.toml` のバージョンが違えば失敗するようにした（判断の理由: どちらもタグの実行でしか見つからず、公開後に気づくと版の取り直しになるため、下書きを作る前に止める）。テスト `test-release-notes.ps1` 11 件（CI の pwsh 7 とローカルの Windows PowerShell 5.1 の両方で成功）。
+- 自作のスクリプトで、Windows PowerShell 5.1 では param の既定値の中で `$PSScriptRoot` が空になり、`-Changelog` を省くと失敗することを見つけて修正（テストを追加）。テスト中、`-like` が `[9.9.9]` をワイルドカードとして扱い、期待した失敗文と一致しないこともあった。
+- `[0.1.0]` の 15 項目はすべて 140 文字以内（最長 110 文字）。実際の本文を Clipshare の `formatReleaseNotes` に通して切り詰めがないことを確認。**ただし表示されるのは先頭 5 項目だけ**（`RELEASE_NOTES_MAX_ITEMS`）。項目の並びと内容は変えていない（オーナー判断）。
+- CI 全成功の後、マージコミットでマージ（`68fcaa2`）。タグは付けていない。
+
+### 12.5 オーナーの作業（この順）
+1. 証明書の作成（リポジトリの外に出力。パスワードは安全に保管）: `.\installer
+ew-dev-certificate.ps1 -OutDir C:\secure` → `C:\secure\ClipshareQuick-dev.pfx`（秘密）と `ClipshareQuick.cer`（公開）。
+2. GitHub Secrets（リポジトリ → Settings → Secrets and variables → Actions → New repository secret）に登録:
+   - `MSIX_PFX_BASE64`: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\secure\ClipshareQuick-dev.pfx")) | Set-Clipboard` → 値に貼り付け → 登録後 `Set-Clipboard -Value " "` でクリップボードを消す。
+   - `MSIX_PFX_PASSWORD`: .pfx のパスワード。
+   - gh を使う場合: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\secure\ClipshareQuick-dev.pfx")) | gh secret set MSIX_PFX_BASE64 --repo choko1229/clipshare-qick`、`gh secret set MSIX_PFX_PASSWORD --repo choko1229/clipshare-qick`（入力は画面に出ない）。
+3. `git fetch origin; git log -1 origin/main` で先頭が PR #3（この記録）のマージコミットであることを確認（PR #2 のマージ `68fcaa2` の後は docs の変更だけで、リリースの内容は同じ） → `git switch main; git pull --ff-only` → `git tag v0.1.0` → `git push origin v0.1.0`。
+4. Actions の「Release」の完了後、下書きに exe・MSIX・SHA256SUMS の 3 ファイルだけがあること、本文が CHANGELOG の `[0.1.0]` であることを確認して公開。
+5. Clipshare の管理画面（管理 › 連携トークン › Clipshare Quick 連携の設定）に証明書の **SHA-256**（Windows の「拇印」SHA-1 ではない）を入力。例: `(Get-FileHash C:\secure\ClipshareQuick.cer -Algorithm SHA256).Hash`（`.cer` は DER のため証明書の SHA-256 と同じ。手順の正本は clipeshare の DEPLOY §5）。
+6. `MANUAL_TESTS.md` の実機確認（特に §11）。
+
+### 12.6 証明書のファイル名の確認
+- `new-dev-certificate.ps1` の出力は `<OutDir>\ClipshareQuick-dev.pfx`（秘密鍵つき）と `<OutDir>\ClipshareQuick.cer`（公開鍵のみ）。`installer/README.md`（§1・§2・§3・§4）と本書 §12.5 の名前は一致していた。
+- `installer/build-msix.ps1` の使用例だけが `C:\secure\dev.pfx` だったため、`C:\secure\ClipshareQuick-dev.pfx` に直した（コメントのみ）。ワークフロー内の `sign.pfx`・`signing.cer` は実行時の一時ファイル名で、オーナーの手順には出ない。

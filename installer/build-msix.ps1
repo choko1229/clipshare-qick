@@ -14,7 +14,7 @@
 
 .EXAMPLE
   .\installer\build-msix.ps1 -Version 0.1.0
-  .\installer\build-msix.ps1 -Version 0.1.0 -PfxPath C:\secure\dev.pfx
+  .\installer\build-msix.ps1 -Version 0.1.0 -PfxPath C:\secure\ClipshareQuick-dev.pfx
   （Publisher は installer\signing.json から読む。-Publisher で上書きできる）
 #>
 param(
