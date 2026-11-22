@@ -283,7 +283,7 @@ ew-dev-certificate.ps1 -OutDir C:\secure` → `C:\secure\ClipshareQuick-dev.pfx`
    - `MSIX_PFX_BASE64`: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\secure\ClipshareQuick-dev.pfx")) | Set-Clipboard` → 値に貼り付け → 登録後 `Set-Clipboard -Value " "` でクリップボードを消す。
    - `MSIX_PFX_PASSWORD`: .pfx のパスワード。
    - gh を使う場合: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\secure\ClipshareQuick-dev.pfx")) | gh secret set MSIX_PFX_BASE64 --repo choko1229/clipshare-qick`、`gh secret set MSIX_PFX_PASSWORD --repo choko1229/clipshare-qick`（入力は画面に出ない）。
-3. `git fetch origin; git log -1 origin/main` で先頭が `68fcaa2`（PR #2 のマージ）であることを確認 → `git switch main; git pull --ff-only` → `git tag v0.1.0` → `git push origin v0.1.0`。
+3. `git fetch origin; git log -1 origin/main` で先頭が PR #3（この記録）のマージコミットであることを確認（PR #2 のマージ `68fcaa2` の後は docs の変更だけで、リリースの内容は同じ） → `git switch main; git pull --ff-only` → `git tag v0.1.0` → `git push origin v0.1.0`。
 4. Actions の「Release」の完了後、下書きに exe・MSIX・SHA256SUMS の 3 ファイルだけがあること、本文が CHANGELOG の `[0.1.0]` であることを確認して公開。
 5. Clipshare の管理画面（管理 › 連携トークン › Clipshare Quick 連携の設定）に証明書の **SHA-256**（Windows の「拇印」SHA-1 ではない）を入力。例: `(Get-FileHash C:\secure\ClipshareQuick.cer -Algorithm SHA256).Hash`（`.cer` は DER のため証明書の SHA-256 と同じ。手順の正本は clipeshare の DEPLOY §5）。
 6. `MANUAL_TESTS.md` の実機確認（特に §11）。
