@@ -282,7 +282,7 @@ ew-dev-certificate.ps1 -OutDir C:\secure` → `C:\secure\ClipshareQuick-dev.pfx`
 2. GitHub Secrets（リポジトリ → Settings → Secrets and variables → Actions → New repository secret）に登録:
    - `MSIX_PFX_BASE64`: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\secure\ClipshareQuick-dev.pfx")) | Set-Clipboard` → 値に貼り付け → 登録後 `Set-Clipboard -Value " "` でクリップボードを消す。
    - `MSIX_PFX_PASSWORD`: .pfx のパスワード。
-   - gh を使う場合: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\secure\ClipshareQuick-dev.pfx")) | gh secret set MSIX_PFX_BASE64 --repo choko1229/clipshare-qick`、`gh secret set MSIX_PFX_PASSWORD --repo choko1229/clipshare-qick`（入力は画面に出ない）。
+   - gh を使う場合: **Git Bash で** `base64 -w0 /c/secure/ClipshareQuick-dev.pfx | gh secret set MSIX_PFX_BASE64 --repo choko1229/clipshare-qick`、（Windows PowerShell 5.1 のパイプは先頭に BOM を付けるため使わない。§13.2）`gh secret set MSIX_PFX_PASSWORD --repo choko1229/clipshare-qick`（入力は画面に出ない）。
 3. `git fetch origin; git log -1 origin/main` で先頭が PR #3（この記録）のマージコミットであることを確認（PR #2 のマージ `68fcaa2` の後は docs の変更だけで、リリースの内容は同じ） → `git switch main; git pull --ff-only` → `git tag v0.1.0` → `git push origin v0.1.0`。
 4. Actions の「Release」の完了後、下書きに exe・MSIX・SHA256SUMS の 3 ファイルだけがあること、本文が CHANGELOG の `[0.1.0]` であることを確認して公開。
 5. Clipshare の管理画面（管理 › 連携トークン › Clipshare Quick 連携の設定）に証明書の **SHA-256**（Windows の「拇印」SHA-1 ではない）を入力。例: `(Get-FileHash C:\secure\ClipshareQuick.cer -Algorithm SHA256).Hash`（`.cer` は DER のため証明書の SHA-256 と同じ。手順の正本は clipeshare の DEPLOY §5）。
@@ -291,3 +291,42 @@ ew-dev-certificate.ps1 -OutDir C:\secure` → `C:\secure\ClipshareQuick-dev.pfx`
 ### 12.6 証明書のファイル名の確認
 - `new-dev-certificate.ps1` の出力は `<OutDir>\ClipshareQuick-dev.pfx`（秘密鍵つき）と `<OutDir>\ClipshareQuick.cer`（公開鍵のみ）。`installer/README.md`（§1・§2・§3・§4）と本書 §12.5 の名前は一致していた。
 - `installer/build-msix.ps1` の使用例だけが `C:\secure\dev.pfx` だったため、`C:\secure\ClipshareQuick-dev.pfx` に直した（コメントのみ）。ワークフロー内の `sign.pfx`・`signing.cer` は実行時の一時ファイル名で、オーナーの手順には出ない。
+
+## 13. リリースの実行（v0.1.0、2026-11-22）
+
+オーナーの依頼で、証明書の作成・Secrets の登録・タグの push・ワークフローの監視まで実施。下書きの公開はしていない。パスワードはオーナーがターミナルで入力し、Claude Code は受け取っていない。.pfx・パスワード・Base64 の値は画面・ログ・コミット・ファイルに出していない。
+
+### 13.1 結果
+| 手順 | 結果 |
+|---|---|
+| 事前確認 | main の先頭 `9d5f4b7`、gh は choko1229（admin、`repo`・`workflow`）、v0.1.0 のタグ・Release なし |
+| 証明書 | `C:\secure\ClipshareQuick-dev.pfx`（2,678 バイト）、`ClipshareQuick.cer`（778 バイト、秘密鍵なし）。Subject `CN=choko1229` は `signing.json` と一致。EKU はコード署名、有効期間 2026-11-22〜2028-11-22 |
+| フィンガープリント | SHA-256 `1D5AE54F239A9AD331094163A66315B63919717121E930996D7D5A9B02CF18C0`（拇印 SHA-1 は `218EC9E81B9CF3BD7AE2095937287AC1BA3A1383`） |
+| Secrets | `MSIX_PFX_BASE64`・`MSIX_PFX_PASSWORD`（名前のみ確認） |
+| タグ | `v0.1.0` → `9d5f4b7af0c5eba1bdd9dea3a8eb6c627791996c`（`git rev-parse v0.1.0^{commit}`） |
+| ワークフロー | run `45017867808`。1 回目は失敗（§13.2）、Secret を登録し直して再実行（2 回目）で成功 |
+
+### 13.2 1 回目の失敗（Secret の先頭の BOM）
+- 「署名用の証明書を復元」で `FromBase64String` が「non-base 64 character」で失敗。下書きは作られず、後片付けの手順は実行された。ログに秘密情報なし（`***` のみ）。
+- 原因: Windows PowerShell 5.1 で `[Convert]::ToBase64String(...) | gh secret set ...` とすると、外部コマンドへのパイプの先頭に UTF-8 の BOM（`EF BB BF`）が付く。同じパイプを中身を出さないスクリプトに渡して確認（3,572 バイトの Base64 に BOM 3 バイトと CRLF 2 バイトが付いて 3,577 バイト）。末尾の改行は `FromBase64String` が無視するが、U+FEFF は無視しない。`$OutputEncoding` の preamble は 0 と表示されたので、設定値からは気づけなかった。
+- 対応: Git Bash の `base64 -w0 ... | gh secret set MSIX_PFX_BASE64 ...` で登録し直した（事前に BOM・改行なし、元の .pfx に戻ることを確認）。タグは付け直さず `gh run rerun` で再実行。
+- §12.5 の「gh を使う場合」の手順も同じ問題があったため Git Bash の手順に直した。Web の画面に `Set-Clipboard` で貼る手順（`installer/README.md`）は BOM が付かないので変えていない。
+
+### 13.3 下書きの内容（公開していない）
+- 添付は 3 ファイルだけ: `ClipshareQuick-Setup-0.1.0.exe`（5,262,848 バイト）、`ClipshareQuick-0.1.0.msix`（5,004,737 バイト）、`SHA256SUMS`（189 バイト）。
+- `SHA256SUMS`: 小文字 hex、区切りは空白 2 つ、LF のみ（CR 0）、BOM なし、最終行も LF、exe → MSIX の順、ファイル名は添付名と一致。ダウンロードした実ファイルで `sha256sum -c` が 2 つとも OK、GitHub の digest とも一致、Clipshare の `parseSha256Sums` も `ok`。
+  - exe `8e0b6286b0acee4d33c54c4259c942c81450d6f544dce267cb428469670685a1`
+  - MSIX `419ce08a0252945cb7b2cf68fe4d9eeac8a7e840ec43785e66f1f6bba04e7a84`
+- 本文: `release-notes.ps1 -Version 0.1.0` の出力と一致（CHANGELOG の `[0.1.0]`、15 項目）。題名「Clipshare Quick 0.1.0」、プレリリースではない。
+- 署名:
+  - MSIX は `CN=choko1229`（拇印が作った証明書と一致）で署名済み。この PC は自己署名のルートを信頼していないため状態は「信頼されていないルート」（想定どおり。信頼はセットアップの手順で行う）。マニフェストは `choko1229.ClipshareQuick`、Publisher `CN=choko1229`、Version `0.1.0.0`。
+  - **タイムスタンプなし**（`build-msix.ps1` の `signtool sign` に `/tr` が無い）。証明書の期限（2028-11-22）の後は、この MSIX の署名が新しいインストールで有効と扱われなくなる可能性がある。
+  - **セットアップ exe は署名されていない**（設計どおり。`build-msix.ps1` は MSIX だけ署名する）。ダウンロード時・起動時に SmartScreen の警告が出る可能性がある。
+  - どちらも今回は変えていない（変えるなら新しい版で。オーナー判断）。
+
+### 13.4 オーナーの作業（この順）
+1. 下書き（Releases の「Draft」）を開き、3 ファイル・本文を確認して公開（Publish release）。
+2. Clipshare の管理画面（管理 › 連携トークン › Clipshare Quick 連携の設定）にフィンガープリント `1D5AE54F239A9AD331094163A66315B63919717121E930996D7D5A9B02CF18C0` を入力（`AB:CD:…` の形式でも可）。
+3. `/qick/download` を確認: セットアップ exe と MSIX、更新履歴（先頭 5 項目）、フィンガープリント行、`GET /api/v1/client/latest` が 0.1.0 と上の SHA-256 を返すこと（キャッシュの更新待ちがある）。
+4. `MANUAL_TESTS.md` の実機確認（特に §1・§8・§9・§11）。
+5. 判断: セットアップ exe の署名と、MSIX のタイムスタンプを次の版で入れるか（§13.3）。

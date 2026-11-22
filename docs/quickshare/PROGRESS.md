@@ -60,5 +60,6 @@
 - [x] `cargo audit` の失敗（RUSTSEC-2026-0592、`url` 2.5.8）を 2.5.9 への更新で解消 — 2026-11-22
 - [x] PR #1（`feature/installer`）をマージコミットでマージ（`28b4064`、main の CI 成功） — 2026-11-22
 - [x] 0.1.0 を確定（CHANGELOG）、Release の本文を CHANGELOG の節から作成、タグと Cargo.toml の照合（PR #2、`68fcaa2`） — 2026-11-22
-- [ ] オーナー: 証明書の作成、Secrets の登録、`v0.1.0` タグの push、下書きの確認と公開、管理画面のフィンガープリント（REPORT §12.5）
+- [x] 証明書の作成、Secrets の登録、`v0.1.0` タグの push（`9d5f4b7`）、リリースのワークフロー（1 回目は Secret の BOM で失敗、登録し直して再実行で成功、下書きを確認） — 2026-11-22（REPORT §13）
+- [ ] オーナー: 下書きの公開、管理画面のフィンガープリント、`/qick/download` の確認（REPORT §13.4）
 - [ ] 実機確認（MANUAL_TESTS、特に §11）
