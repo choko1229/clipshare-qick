@@ -26,13 +26,26 @@ jobs:
       - name: SHA256SUMS のスクリプトのテスト
         shell: pwsh
         run: ./installer/test-release-checksums.ps1
+      - name: Release の本文のスクリプトのテスト
+        shell: pwsh
+        run: ./installer/test-release-notes.ps1
       - name: バージョン
         id: ver
         shell: pwsh
         run: |
           $v = "${{ github.ref_name }}".TrimStart("v")
           if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "タグは vX.Y.Z 形式にしてください" }
+          # タグとアプリのバージョン（Cargo.toml、MSIX は X.Y.Z.0）が違うまま配布しない
+          $meta = cargo metadata --no-deps --format-version 1 --locked | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "cargo metadata に失敗しました" }
+          $app = @($meta.packages | Where-Object { $_.name -ceq "clipshare-quick" })
+          if ($app.Count -ne 1) { throw "clipshare-quick のパッケージが見つかりません" }
+          if ($app[0].version -cne $v) { throw "タグ v$v と Cargo.toml のバージョン $($app[0].version) が違います" }
           "version=$v" >> $env:GITHUB_OUTPUT
+      - name: Release の本文を CHANGELOG.md から作成
+        shell: pwsh
+        # Clipshare のダウンロードページの「更新履歴」に出る。節が無い・140 文字を超える項目があれば失敗する
+        run: ./installer/release-notes.ps1 -Version ${{ steps.ver.outputs.version }} -Out "$env:RUNNER_TEMP/RELEASE_NOTES.md"
       - name: 同じタグの Release が無いことを確認
         id: precheck
         shell: pwsh
@@ -84,7 +97,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $v = "${{ steps.ver.outputs.version }}"
-          gh release create "v$v" --draft --verify-tag --title "Clipshare Quick $v" --notes "CHANGELOG.md を参照" `
+          gh release create "v$v" --draft --verify-tag --title "Clipshare Quick $v" --notes-file "$env:RUNNER_TEMP/RELEASE_NOTES.md" `
             "dist/ClipshareQuick-Setup-$v.exe" "dist/ClipshareQuick-$v.msix" "dist/SHA256SUMS"
           if ($LASTEXITCODE -ne 0) { throw "下書きの Release を作成できませんでした" }
       - name: 添付した実ファイルを SHA256SUMS・digest と照合

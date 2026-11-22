@@ -13,6 +13,8 @@
 | `signing.json` | Publisher（証明書の Subject）を 1 か所で管理する。値は `CN=choko1229`（QUESTIONS Q-026、確認済み） |
 | `release-checksums.ps1` | リリースの `SHA256SUMS` を作る・添付ファイルと照合する（QUESTIONS Q-028） |
 | `test-release-checksums.ps1` | `release-checksums.ps1` の自動テスト（CI とリリースで実行） |
+| `release-notes.ps1` | `CHANGELOG.md` の `## [X.Y.Z] - YYYY-MM-DD` の節を取り出し、GitHub Release の本文にする（1 項目 140 文字まで） |
+| `test-release-notes.ps1` | `release-notes.ps1` の自動テスト（CI とリリースで実行） |
 
 配布物（GitHub Releases に添付するもの）:
 
@@ -65,7 +67,9 @@ Get-ChildItem Cert:\LocalMachine\TrustedPeople | Where-Object Subject -eq "CN=ch
 `.github/workflows/release.yml` が `v*` タグの push で動き、ビルド・パッケージ作成・署名を行い、
 **下書き（draft）の Release** に成果物を添付する。公開（Publish release）は人が内容を確認してから行う。
 
-1. `CHANGELOG.md` の `[Unreleased]` をバージョン見出しにする。`Cargo.toml` の `version` を上げる。
+1. `CHANGELOG.md` の `[Unreleased]` をバージョン見出し（`## [X.Y.Z] - YYYY-MM-DD`）にし、空の `[Unreleased]` を残す。`Cargo.toml` の `version` を同じ値にする。
+   - Release の本文はこの節から作る（`release-notes.ps1`）。Clipshare のダウンロードページの「更新履歴」に出るのは本文の箇条書きの**先頭 5 項目・1 項目 140 文字まで**（Clipshare 側 `lib/quick-client/release-notes.ts`）。140 文字を超える項目があるとワークフローは失敗する。
+   - タグと `Cargo.toml` のバージョンが違うとワークフローは失敗する（MSIX のバージョンは `X.Y.Z.0`、`build-msix.ps1`）。
 2. GitHub のリポジトリ設定 → Secrets に登録する（値はチャットやログに出さない）:
    - `MSIX_PFX_BASE64`: `.pfx` を Base64 にしたもの（`[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\secure\ClipshareQuick-dev.pfx"))`）
    - `MSIX_PFX_PASSWORD`: `.pfx` のパスワード
