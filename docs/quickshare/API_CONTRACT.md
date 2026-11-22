@@ -1,9 +1,4 @@
-# API 契約 v1（Clipshare ⇔ Clipshare Quick）
-
-> **照合待ち（2026-11-21）**: このコピーは v1.1 のスナップショット。オーナーから v1.2（`client/latest` の `sha256` は常に非 null、
-> exe と MSIX がそろった版だけを配布、SHA256SUMS と GitHub の digest の一致を配布の条件にする）の内容を受け取って実装済み。
-> **Clipshare 側（`choko1229/clipeshare` の `main`）に v1.2 がマージされたら、正本と突き合わせてこのファイルを差し替え、
-> SHA256SUMS の形式（QUESTIONS Q-028）と一致するかを確認する。**
+# API 契約 v1.2（Clipshare ⇔ Clipshare Quick）
 
 **正本は `clipeshare` リポジトリ（main）の `docs/quickshare/API_CONTRACT.md`。** `clipshare-qick` 側のコピーはスナップショット。変更は**追加のみ**（互換維持）。破壊的変更が必要なら実装せず `QUESTIONS.md` に書く。Clipshare側が変更・追加したら末尾「変更履歴」に追記する。
 本書は設計案であり、既存実装（`POST /api/qick/upload` 等）との整合をClipshare側Claude Codeがコードで確認し、**差異があればこの文書を更新**してよい（その場合は変更履歴に理由を書く）。
@@ -22,7 +17,7 @@
 |---|---|---|---|
 | 400 | INVALID_REQUEST | — | 入力不正。再試行しない |
 | 401 | UNAUTHORIZED | — | トークン無効/失効。再認可を促す（匿名にしない） |
-| 403 | FORBIDDEN | — | 権限なし（BAN されたアカウントのトークンを含む）。再認可しても解決しないので停止 |
+| 403 | FORBIDDEN | — | 権限なし（BAN されたアカウントのトークンを含む）。再認可しても解決しないので停止し、**お問い合わせページ `{base}/contact` へ案内する**（ログイン不要で利用可） |
 | 404 | NOT_FOUND | — | 対象なし/他人のリソース |
 | 413 | SIZE_LIMIT_EXCEEDED | `limitBytes`, `kind`（`IMAGE`/`VIDEO`）、画素数超過時は `limitPixels` も | 画像→縮小して再送／動画→エラー表示。画像は1億画素を超える場合も 413（縮小して再送すれば通る）。**前段の nginx が HTML の 413 を返すこともある**ので、JSON でない 413 も同じ扱いにする（`limitBytes` 不明） |
 | 415 | UNSUPPORTED_MEDIA | — | 種別不正（マジックバイト不一致含む）。再試行しない |
@@ -78,9 +73,58 @@
 
 ## クライアント更新情報
 ### `GET /api/v1/client/latest`（認証不要・サーバー側でキャッシュ）
-200: `{ "version": "1.2.3", "publishedAt": "ISO", "notes": "…", "minSupportedVersion": "1.0.0"|null, "assets": [ { "name": "ClipshareQuick-1.2.3.msix", "url": "https://github.com/…", "sizeBytes": n, "sha256": "…"|null } ] }`
-GitHub API 失敗時は最後に成功した結果を返す。一度も取得できていない場合は 503 `SERVICE_UNAVAILABLE`。
-- `version` はリリースのタグ名から先頭の `v` を除いたもの。`sha256` は GitHub が asset の digest を返す場合のみ（無ければ null）。`minSupportedVersion`・リポジトリ・キャッシュ時間は管理画面の設定値。
+200: `{ "version": "1.2.3", "publishedAt": "ISO", "notes": "…", "minSupportedVersion": "1.0.0"|null, "assets": [ { "name": "ClipshareQuickSetup-1.2.3.exe", "url": "https://github.com/…", "sizeBytes": n, "sha256": "<64桁の小文字16進>" }, { "name": "ClipshareQuick-1.2.3.msix", … } ] }`
+- **`sha256` は常に64桁の小文字16進で、null にならない（v1.2）。** クライアントはダウンロード後に必ず照合し、一致しなければ適用しない。
+- `assets` は配布ファイル（拡張子 `.exe` / `.msix` / `.msixbundle`）だけ。`SHA256SUMS` や `.appinstaller` などは含めない。
+- `version` はリリースのタグ名から先頭の `v` を除いたもの。下書き・プレリリースは対象外。`minSupportedVersion`・リポジトリ・キャッシュ時間は管理画面の設定値。
+- **SHA-256 の出どころ**（Clipshare 側）: ① リリースに添付された `SHA256SUMS`（形式は下の「SHA256SUMS の形式」）→ ② 管理画面での手動登録（`SHA256SUMS` が無い・取得できないときだけ）。GitHub が asset の digest を返す場合は一致も確認し、食い違えば配信しない。
+- **配信対象**: すべての配布ファイルに SHA-256 が揃ったリリースだけ。最新が揃っていなければ、直近3件まで遡って揃っているもの → 前回配信したもの（今回の確認で配信不可と判定したリリースは除く）の順で返す（＝旧バージョンを継続。`version` が GitHub 上の最新より古いことがある）。
+- **503 `SERVICE_UNAVAILABLE`** になる条件: 配信できるリリースが一度も無い（直近3件のどれも SHA-256 が揃わず、前回配信したものも無い）。GitHub に一時的に繋がらない場合は、前回の結果を返す。
+
+#### SHA256SUMS の形式（クライアントのリリースワークフロー向け。この節だけで実装できるように書いている）
+Clipshare は GitHub Releases の各リリースに添付された `SHA256SUMS` を読み、配布ファイルの SHA-256 として `GET /api/v1/client/latest` で返す。
+
+**添付するファイル**
+- ファイル名: `SHA256SUMS`（`SHA256SUMS.txt` も可）。同じリリースのアセットとして添付する。
+- 文字コード UTF-8（BOM は付けない。付いていても無視する）、サイズ 64KB 以下、空行を除いて 200 行以下。
+- そのリリースの**配布ファイルすべて**（拡張子 `.exe` / `.msix` / `.msixbundle`。現在はセットアップ exe と MSIX の2つ）を必ず載せる。
+
+**1行の形式**（1行1ファイル。GNU `sha256sum` の出力と同じ）
+```
+<64桁の16進><空白><空白><ファイル名>
+```
+例（Publisher `CN=choko1229`、v1.2.3 の場合）:
+```
+3f0c1e…（64桁）  ClipshareQuickSetup-1.2.3.exe
+9a7b42…（64桁）  ClipshareQuick-1.2.3.msix
+```
+- **ファイル名は GitHub のアセット名と完全一致**（大文字小文字も同じ）。パス（`./`、`dist/`、`\`）を付けない。
+  - 生成例（配布ファイルと同じフォルダで実行する）:
+    - Linux / Git Bash: `sha256sum ClipshareQuickSetup-1.2.3.exe ClipshareQuick-1.2.3.msix > SHA256SUMS`
+    - PowerShell: `Get-ChildItem *.exe, *.msix | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_ -Algorithm SHA256).Hash.ToLower(), $_.Name } | Set-Content -Encoding ascii SHA256SUMS`
+- ファイル名に使えない文字: 制御文字、`/`、`\`、前後の空白。
+
+**解析で許容する範囲**
+| 項目 | 許容 |
+|---|---|
+| 16進の大文字・小文字 | どちらでも可（Clipshare は小文字に正規化して返す） |
+| 改行コード | LF / CRLF のどちらでも可 |
+| 区切り | 空白2つ（テキスト）または「空白 + `*`」（`sha256sum -b` のバイナリ指示子。`*` はファイル名に含めない） |
+| 空行 | 無視（末尾・途中とも） |
+| 行末の空白 | 無視 |
+| 配布ファイル以外の行 | そのリリースに実在するアセット（例 `.appinstaller`）なら可。返す `assets` には含めない |
+
+**不正とみなすもの → そのリリースは配信しない**（`SHA256SUMS` 全体を信用しない。管理画面の手動登録でも上書きしない）
+- 64桁でない値・16進以外の文字・区切りが空白1つやタブ・行頭の空白・BSD 形式（`SHA256 (name) = …`）などの形式違いの行が1行でもある
+- 同じファイル名の行が2回以上ある（値が同じでも不可）
+- そのリリースのアセットに無いファイル名の行がある（別リリースの `SHA256SUMS` の取り違えとみなす）
+- パスを含むファイル名、空のファイル
+- 配布ファイルのどれかが載っていない
+- GitHub がアセットに付ける digest（`sha256:…`）と値が食い違う
+
+**手動登録が使われる場合**: `SHA256SUMS` が添付されていない、または取得できない（GitHub 側の障害など）ときだけ、管理画面で登録した値を使う。
+
+**配信されないとき**: 直近3件のリリースまで遡り、条件を満たす一番新しいものを返す（＝旧バージョンを継続）。どれも満たさず前回配信したものも無ければ 503。
 
 ## 変更履歴
 - v1 (2026-11-20): 初版（設計案）。
@@ -95,3 +139,7 @@ GitHub API 失敗時は最後に成功した結果を返す。一度も取得で
   - `GET /api/v1/client/latest`: `sha256` を nullable に、未取得時 503 を追加。
   - セルフレビュー2回目: `file` はファイル名付きのパートで送ること（無いと 400）を明記。画像処理中のディスク不足などサーバー側の失敗は 415 ではなく 500（再試行対象）。
   - Step 3 実装時: 画像の画素数上限（1億画素、展開爆弾対策）を 413 `limitPixels` として追加。`DAILY_LIMIT_EXCEEDED` の details に `dailyLimit` を追加。
+- v1.2 (2026-11-21, オーナー回答による更新):
+  - `GET /api/v1/client/latest`: **`assets[].sha256` は常に非 null**（v1.1 の nullable を撤回。クライアントは null を想定しなくてよい）。SHA-256 は `SHA256SUMS` → 管理画面の手動登録 の順で決め、揃わないリリースは配信しない（旧バージョン継続、配信できるものが無ければ 503）。`assets` は `.exe` / `.msix` / `.msixbundle` のみ。リリースワークフローに `SHA256SUMS` の添付を要求。
+  - `403 FORBIDDEN`（BAN）の案内先を `{base}/contact`（お問い合わせ。ログイン不要）と明記。
+  - （追記 2026-11-21）「SHA256SUMS の形式」の節を追加し、単独で読める仕様にした。ファイル名はアセット名と完全一致（パス不可）、同じファイル名の重複は不可、アセットに無いファイル名の行があるとそのリリースは配信しない、`SHA256SUMS` が不正なときは手動登録でも上書きしない、を明記（実装も合わせて厳格化。以前はパスを除いて照合し、同じ値の重複を許していた）。
