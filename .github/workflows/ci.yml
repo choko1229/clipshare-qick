@@ -34,6 +34,9 @@ jobs:
       - name: SHA256SUMS のスクリプトのテスト
         shell: pwsh
         run: ./installer/test-release-checksums.ps1
+      - name: Release の本文のスクリプトのテスト
+        shell: pwsh
+        run: ./installer/test-release-notes.ps1
       - name: cargo build --release
         run: cargo build --workspace --release --locked
       - name: 成果物
