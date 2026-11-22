@@ -1,0 +1,30 @@
+[package]
+name = "clipshare-quick"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+arboard = "3.7.0"
+chrono = "0.4.45"
+cq-core = { version = "0.1.0", path = "../core" }
+cq-ipc = { version = "0.1.0", path = "../ipc" }
+cq-vr = { version = "0.1.0", path = "../vr" }
+eframe = { version = "0.31", default-features = false, features = ["glow", "default_fonts"] }
+egui = "0.31"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+tokio-util = "0.7.20"
+tracing = "0.1.44"
+tray-icon = "0.21"
+url = "2.5.8"
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading", "Win32_System_Registry", "Win32_Storage_Packaging_Appx", "Win32_UI_Shell", "Win32_System_Com", "Win32_Security_WinTrust", "Win32_Security_Cryptography", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "UI_Notifications", "Data_Xml_Dom", "Foundation", "Foundation_Collections", "ApplicationModel", "Management_Deployment", "Win32_UI_Shell_Common", "Win32_UI_HiDpi", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Recovery"] }
+windows-future = "0.2"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile = "3.27.0"
